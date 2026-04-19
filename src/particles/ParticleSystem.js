@@ -10,7 +10,8 @@
  *              `gl_VertexID`; particles drawn as GL_POINTS with soft glow.
  */
 
-import { createProgram, createDoubleFBO, createFBO } from '../webgl/GLUtils.js';
+import { createProgram, createDoubleFBO, createFBO,
+         destroyFBO, destroyDoubleFBO } from '../webgl/GLUtils.js';
 import {
   SIMPLE_VERT,
   PARTICLE_UPDATE_FRAG,
@@ -42,6 +43,29 @@ export class ParticleSystem {
     this._init(config.PARTICLE_COUNT);
   }
 
+  /**
+   * Release all GPU resources (programs + position FBOs + index buffer).
+   * Idempotent. Call before discarding the instance — adaptive resize
+   * recreates the system, and a leak per resize event will OOM mobile
+   * GPUs in a few minutes.
+   */
+  destroy() {
+    const { gl } = this;
+    if (this._destroyed) return;
+    this._destroyed = true;
+    for (const k of ['_updateProg', '_spawnProg', '_renderProg']) {
+      if (this[k]) {
+        try { gl.deleteProgram(this[k].program); } catch (_) {}
+        this[k] = null;
+      }
+    }
+    destroyDoubleFBO(gl, this._posFBO); this._posFBO = null;
+    if (this._indexBuf) {
+      try { gl.deleteBuffer(this._indexBuf); } catch (_) {}
+      this._indexBuf = null;
+    }
+  }
+
   /* ──────────────────────────────────────────────────────────────────
      Initialisation
      ────────────────────────────────────────────────────────────────── */
@@ -59,6 +83,13 @@ export class ParticleSystem {
    */
   _init(count) {
     const { gl } = this;
+
+    // Free any previously-allocated position FBOs to avoid leaking GPU
+    // memory across resize() calls and PARTICLE_COUNT changes.
+    if (this._posFBO) {
+      destroyDoubleFBO(gl, this._posFBO);
+      this._posFBO = null;
+    }
 
     // Track the requested count so resize() can compare correctly
     this._requestedCount = count;
@@ -196,7 +227,7 @@ export class ParticleSystem {
     gl.uniform1i(uniforms.uPositions,  this._posFBO.read.attach(0));
     gl.uniform1i(uniforms.uVelocity,   velocityFBO.attach(1));
     gl.uniform2i(uniforms.uTexSize,    this._texW, this._texH);
-    gl.uniform1f(uniforms.uPointSize,  config.PARTICLE_SIZE * window.devicePixelRatio);
+    gl.uniform1f(uniforms.uPointSize,  config.PARTICLE_SIZE * Math.min(window.devicePixelRatio, 2));
     gl.uniform2f(uniforms.uCanvasSize, canvasW, canvasH);
     gl.uniform1f(uniforms.uTime,       (performance.now() - this._t0) * 0.001);
     // When COLORFUL is on we let the fluid's hue cycling tint the droplets;

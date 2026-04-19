@@ -114,9 +114,10 @@ export const CONFIG = {
    */
   AUDIO_REACTIVE: false,
 
-  /** Bass band (Hz). Body of a kick drum / sub. Drives soft corner pulses. */
-  AUDIO_BASS_LOW_HZ: 30,
-  AUDIO_BASS_HIGH_HZ: 180,
+  /** Bass band (Hz). 60–160 trims 50/60 Hz mains hum and stays on the
+   *  body of a kick drum. Drives soft converging ring. */
+  AUDIO_BASS_LOW_HZ: 60,
+  AUDIO_BASS_HIGH_HZ: 160,
   /** Mids band (Hz). Snares / vocals. Drives counter-rotating vortex pairs. */
   AUDIO_MIDS_LOW_HZ: 300,
   AUDIO_MIDS_HIGH_HZ: 2200,
@@ -145,7 +146,7 @@ export const CONFIG = {
   AUDIO_MIDS_GAIN:   0.55,   // mids vortex-pair gain
   AUDIO_HIGHS_GAIN:  0.18,   // highs sparkle dye intensity
 
-  /** Number of splats per bass ring (lowered from 16 — corner pulses are
-   *  cheaper and the four positions already shape the wave). */
-  AUDIO_SPLAT_COUNT: 6,
+  /** Number of splats per bass ring (8 = clean approximation of radial
+   *  symmetry; fewer aliases into × / diamond patterns). */
+  AUDIO_SPLAT_COUNT: 8,
 };

@@ -96,6 +96,8 @@ const ui = new UI(CONFIG, {
   onToggleBloom(on) {},
   onToggleColorful(on) {},
   onTogglePerfMode(perfMode) {
+    fluid.destroy?.();
+    particles.destroy?.();
     fluid     = new FluidSimulation(gl, ext, CONFIG);
     particles = new ParticleSystem(gl, ext, CONFIG);
   },
@@ -133,6 +135,11 @@ let snapshotPending = false;
 function saveSnapshot() { snapshotPending = true; }
 
 function doSnapshot() {
+  // Force the GPU to finish drawing this frame before reading the canvas,
+  // otherwise canvas.toBlob may execute on a cleared back-buffer (next
+  // RAF) and produce a blank PNG. gl.finish() is heavy but acceptable on
+  // a one-off user action like snapshot.
+  gl.finish();
   // Use canvas.toBlob (async, lower memory than toDataURL).
   const v = ui.version || 'dev';
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -208,6 +215,8 @@ function animate(now) {
       if (avgFrameTime > threshold && CONFIG.SIM_RESOLUTION > 64) {
         CONFIG.SIM_RESOLUTION = Math.max(64, CONFIG.SIM_RESOLUTION >> 1);
         CONFIG.DYE_RESOLUTION = Math.max(128, CONFIG.DYE_RESOLUTION >> 1);
+        fluid.destroy?.();
+        particles.destroy?.();
         fluid     = new FluidSimulation(gl, ext, CONFIG);
         particles = new ParticleSystem(gl, ext, CONFIG);
         console.log(`[Fluid] Auto-reduced resolution to ${CONFIG.SIM_RESOLUTION}`);

@@ -143,8 +143,31 @@ export function createDoubleFBO(gl, w, h, internalFormat, format, type, filter) 
 }
 
 /**
- * Resize a double FBO (creates new textures – used for adaptive resolution).
+ * Release a single FBO created via `createFBO`. After this call the
+ * object MUST NOT be used again — its texture, framebuffer and any cached
+ * sampler bindings are gone. Always call this when discarding a sim or
+ * adaptive-resize tear-down to avoid GPU memory leaks.
+ *
+ * @param {WebGL2RenderingContext} gl
+ * @param {{texture:WebGLTexture, fbo:WebGLFramebuffer}} target
  */
+export function destroyFBO(gl, target) {
+  if (!target) return;
+  try { gl.deleteTexture(target.texture); } catch (_) { /* noop */ }
+  try { gl.deleteFramebuffer(target.fbo); } catch (_) { /* noop */ }
+}
+
+/**
+ * Release both buffers of a double FBO created via `createDoubleFBO`.
+ * Safe to call with `null` or a partially initialised object.
+ */
+export function destroyDoubleFBO(gl, target) {
+  if (!target) return;
+  destroyFBO(gl, target.read);
+  destroyFBO(gl, target.write);
+}
+
+
 export function resizeDoubleFBO(gl, target, w, h, internalFormat, format, type, filter) {
   if (target.width === w && target.height === h) return target;
 
@@ -176,7 +199,10 @@ export function createQuad(gl) {
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   gl.bindVertexArray(null);
 
-  return { vao, draw() { gl.bindVertexArray(vao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); } };
+  return {
+    vao, vbo,
+    draw() { gl.bindVertexArray(vao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); },
+  };
 }
 
 /* ──────────────────────────────────────────────────────────────────────

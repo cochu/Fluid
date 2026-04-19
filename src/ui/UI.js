@@ -39,19 +39,17 @@ function forceFromSlider(t) {
 
 /**
  * Viscosity slider 0..100 → ν.
- *   - 0    → 0   (inviscid; viscosity solver fully disabled)
- *   - 50   → 0.18 (clearly viscous, sirupy)
- *   - 100  → 2.0  (honey-like, dampens fast)
- * Cubic curve gives fine control near 0 while reaching meaningfully
- * higher max. Old max was 0.5 with quadratic — too cramped.
+ *   - 0    → 0      (inviscid; viscosity solver fully disabled)
+ *   - 50   → 0.0063 (gentle, lazy flow)
+ *   - 100  → 0.05   (clearly viscous, sirupy)
+ * Cubic curve gives fine control near 0 while still reaching a visibly
+ * thick fluid at the top. Capped at 0.05 because higher ν drives the
+ * implicit Jacobi α past convergence range for our iteration budget,
+ * which re-introduces grid-aligned residue.
  */
 function viscosityFromSlider(t) {
   if (t <= 0) return 0;
   const u = t / 100;
-  // ν max = 0.05 keeps the implicit Jacobi α = ν·Δt·N² ≈ 14 at the top of
-  // the slider with our 20-iteration Jacobi solve. Higher ν visibly fails
-  // to converge in 20 iters and re-introduces grid-aligned residue, so we
-  // intentionally stop here even though the visual is plenty viscous.
   return 0.05 * u * u * u;
 }
 
@@ -394,8 +392,12 @@ export class UI {
 
   _initKeyboard() {
     window.addEventListener('keydown', (e) => {
-      // Don't hijack typing in inputs.
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      // Don't hijack typing in inputs, nor Space/Enter on focused
+      // buttons (pause shortcut would otherwise eat button activation
+      // for keyboard users).
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (tag === 'BUTTON' && (e.code === 'Space' || e.code === 'Enter')) return;
       if (e.code === 'Space') {
         e.preventDefault();
         this._setPaused(!this._config.PAUSED);

@@ -47,19 +47,21 @@ export class AudioReactivity {
     this._source    = null;   // MediaStreamAudioSourceNode
     this._freqData  = null;   // Uint8Array – FFT magnitude buffer
 
-    /** Per-band envelope follower state. Each entry holds the smoothed
-     *  instantaneous level (`env`), slow adaptive baseline (`base`) and
-     *  the timestamp of the last trigger (`lastMs`).
-     *  - `envSmooth` is the EMA retention coefficient for the fast envelope
-     *    (closer to 1 = slower response). Tuned per band so highs follow
-     *    transients faster than sustained low-frequency rumble.
-     *  - `baseSmooth` is the retention coefficient for the slow adaptive
-     *    baseline. */
+    /** Per-band envelope follower state. Each band uses an *asymmetric*
+     *  EMA: a fast attack coefficient when energy rises, a slow release
+     *  coefficient otherwise. Coefficients are EMA "retention" values:
+     *  closer to 1 = slower. The slow adaptive baseline (`base`) tracks
+     *  ambient room level over a much longer window. */
     this._bands = {
-      bass:  { lo: 'AUDIO_BASS_LOW_HZ',  hi: 'AUDIO_BASS_HIGH_HZ',  env: 0, base: 0.05, lastMs: 0, envSmooth: 0.55, baseSmooth: 0.985 },
-      mids:  { lo: 'AUDIO_MIDS_LOW_HZ',  hi: 'AUDIO_MIDS_HIGH_HZ',  env: 0, base: 0.05, lastMs: 0, envSmooth: 0.45, baseSmooth: 0.978 },
-      highs: { lo: 'AUDIO_HIGHS_LOW_HZ', hi: 'AUDIO_HIGHS_HIGH_HZ', env: 0, base: 0.04, lastMs: 0, envSmooth: 0.30, baseSmooth: 0.965 },
+      bass:  { lo: 'AUDIO_BASS_LOW_HZ',  hi: 'AUDIO_BASS_HIGH_HZ',  env: 0, base: 0.05, lastMs: 0, atk: 0.10, rel: 0.78, baseSmooth: 0.994 },
+      mids:  { lo: 'AUDIO_MIDS_LOW_HZ',  hi: 'AUDIO_MIDS_HIGH_HZ',  env: 0, base: 0.05, lastMs: 0, atk: 0.05, rel: 0.70, baseSmooth: 0.988 },
+      highs: { lo: 'AUDIO_HIGHS_LOW_HZ', hi: 'AUDIO_HIGHS_HIGH_HZ', env: 0, base: 0.04, lastMs: 0, atk: 0.00, rel: 0.55, baseSmooth: 0.975 },
     };
+
+    /** Set to true while `stop()` is in progress so an in-flight `start()`
+     *  doesn't go on to install a fresh audio graph after we asked to
+     *  shut down. Checked after every await inside the start IIFE. */
+    this._aborted = false;
 
     /** Resolved when audio is fully running, rejected on failure. */
     this._readyP = null;
@@ -80,6 +82,9 @@ export class AudioReactivity {
     if (this.isActive) return;
     if (this._readyP) return this._readyP;
 
+    this._aborted = false;
+    const checkAbort = () => { if (this._aborted) throw new Error('audio start aborted'); };
+
     this._readyP = (async () => {
       if (!('mediaDevices' in navigator) || !navigator.mediaDevices.getUserMedia) {
         throw new Error('getUserMedia not supported');
@@ -88,7 +93,7 @@ export class AudioReactivity {
       if (!AC) throw new Error('Web Audio API not supported');
 
       // Disable any automatic processing — we WANT raw bass.
-      this._stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
@@ -96,17 +101,31 @@ export class AudioReactivity {
         },
         video: false,
       });
-
-      this._ctx       = new AC();
-      // Some browsers start the context suspended (autoplay policy).
-      if (this._ctx.state === 'suspended') {
-        try { await this._ctx.resume(); } catch (_) { /* best-effort */ }
+      if (this._aborted) {
+        // stop() ran while we were waiting for the mic — release the
+        // freshly-granted track instead of installing it.
+        for (const t of stream.getTracks()) { try { t.stop(); } catch (_) {} }
+        checkAbort();
       }
+      this._stream = stream;
+
+      const ctx = new AC();
+      if (ctx.state === 'suspended') {
+        try { await ctx.resume(); } catch (_) { /* best-effort */ }
+      }
+      if (this._aborted) {
+        try { ctx.close(); } catch (_) {}
+        checkAbort();
+      }
+      this._ctx = ctx;
 
       this._source   = this._ctx.createMediaStreamSource(this._stream);
       this._analyser = this._ctx.createAnalyser();
-      this._analyser.fftSize               = 1024;          // 1024 samples → 512 frequency bins
-      this._analyser.smoothingTimeConstant = 0.6;           // light internal EMA
+      this._analyser.fftSize               = 2048;          // 2048 → ~23 Hz bins; bass band gets 8 bins
+      // We do all smoothing in the per-band asymmetric EMA, so disable
+      // the analyser's internal IIR (it would add a frame of lag and
+      // soften transient detection on snares / hi-hats).
+      this._analyser.smoothingTimeConstant = 0.0;
       this._analyser.minDecibels           = -90;
       this._analyser.maxDecibels           = -10;
 
@@ -127,6 +146,7 @@ export class AudioReactivity {
 
   /** Stop capture, release the mic, free the audio graph. */
   stop() {
+    this._aborted = true;
     this._readyP = null;
     if (this._stream) {
       for (const t of this._stream.getTracks()) {
@@ -164,7 +184,11 @@ export class AudioReactivity {
     let sum = 0;
     for (let i = lo; i <= hi; i++) sum += this._freqData[i];
     const energy = (sum / Math.max(1, hi - lo + 1)) / 255;
-    band.env  = band.env  * band.envSmooth  + energy   * (1 - band.envSmooth);
+    // Asymmetric EMA: react fast on rising energy (attack), decay slowly
+    // on falling energy (release). This gives a clean transient peak
+    // without the smear that a single symmetric coefficient produces.
+    const k = energy > band.env ? band.atk : band.rel;
+    band.env  = band.env  * k + energy   * (1 - k);
     band.base = band.base * band.baseSmooth + band.env * (1 - band.baseSmooth);
     return band.env;
   }
@@ -188,8 +212,10 @@ export class AudioReactivity {
     const mids  = this._updateBand(this._bands.mids,  binHz);
     const highs = this._updateBand(this._bands.highs, binHz);
 
-    // ── Bass: four soft corner pulses pushing inward. Reads as a
-    //    "breathing" pressure wave instead of a violent center burst. ──
+    // ── Bass: 8 soft splats arranged on a circle around the centre,
+    //    each pushing inward. Eight sources approximate radial symmetry
+    //    well enough for the pressure projection to give a clean ring;
+    //    four would alias into a diamond / × interference pattern. ──
     if (bass > cfg.AUDIO_NOISE_FLOOR
         && bass > this._bands.bass.base * cfg.AUDIO_SENSITIVITY
         && (nowMs - this._bands.bass.lastMs) > cfg.AUDIO_REFRACTORY_MS) {
@@ -198,12 +224,14 @@ export class AudioReactivity {
       const mag      = cfg.SPLAT_FORCE * cfg.AUDIO_GAIN * headroom;
       const hue   = (nowMs * 0.0001) % 1;
       const color = hsvToRgb(hue, 0.55, cfg.DYE_BRIGHTNESS * 0.9);
-      // Four corner anchors push toward the centre — produces a
-      // converging round wave that meets in the middle.
-      const corners = [[0.15, 0.15], [0.85, 0.15], [0.85, 0.85], [0.15, 0.85]];
-      for (const [x, y] of corners) {
-        const dx = (0.5 - x) * mag * 0.45;
-        const dy = (0.5 - y) * mag * 0.45;
+      const N = Math.max(6, cfg.AUDIO_SPLAT_COUNT | 0);
+      const r = 0.30;
+      for (let i = 0; i < N; i++) {
+        const a  = (i / N) * Math.PI * 2;
+        const x  = 0.5 + Math.cos(a) * r;
+        const y  = 0.5 + Math.sin(a) * r;
+        const dx = -Math.cos(a) * mag * 0.45;
+        const dy = -Math.sin(a) * mag * 0.45;
         this._splat(x, y, dx, dy, color);
       }
     }

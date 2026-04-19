@@ -771,13 +771,14 @@ void main() {
     vec3  slow     = vec3(0.04, 0.20, 0.55);
     vec3  fast     = vec3(0.65, 0.95, 1.00);
     vec3  aqua     = mix(slow, fast, t * t);
-    vec3  base     = mix(aqua, aqua * (uColor + 0.001) * 1.6, uTintMix);
+    vec3  base     = mix(aqua, aqua * max(uColor, vec3(0.30)) * 1.4, uTintMix);
 
     // Caustic ring — a thin bright annulus at a slowly-jittering radius
-    // mimics underwater refractive light specks. vSeed is per-particle
-    // stable, so neighbours have decorrelated phases.
-    float causticR = 0.26 + 0.05 * sin(uTime * 5.8 + vSeed * 6.28);
-    float ring     = exp(-pow(dist - causticR, 2.0) * 220.0) * 0.50;
+    // mimics underwater refractive light specks. Radius brought inward
+    // (0.18) and falloff loosened (90) so the ring is still visible at
+    // small point sizes (~6–12 px sprite). vSeed decorrelates phase.
+    float causticR = 0.18 + 0.04 * sin(uTime * 5.8 + vSeed * 6.28);
+    float ring     = exp(-pow(dist - causticR, 2.0) * 90.0) * 0.55;
 
     // Fresnel-like rim — bright thin edge that suggests a refracting droplet.
     float rim      = pow(smoothstep(0.30, 0.50, dist), 3.0) * 0.40;

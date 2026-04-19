@@ -16,6 +16,8 @@ import {
   createProgram,
   createFBO,
   createDoubleFBO,
+  destroyFBO,
+  destroyDoubleFBO,
   createQuad,
   getSupportedFormats,
 } from '../webgl/GLUtils.js';
@@ -60,6 +62,38 @@ export class FluidSimulation {
 
     // Hue state for colorful mode
     this._hue = Math.random() * 360;
+  }
+
+  /**
+   * Release every GPU resource owned by this instance: shader programs,
+   * textures, framebuffers, the unit quad VAO/VBO. Idempotent — safe to
+   * call multiple times. Always invoke before discarding the reference,
+   * otherwise textures from old simulations leak across adaptive resizes
+   * and perf-mode toggles and can OOM mobile GPUs after a few minutes.
+   */
+  destroy() {
+    const { gl } = this;
+    if (this._destroyed) return;
+    this._destroyed = true;
+
+    if (this._prog) {
+      for (const k of Object.keys(this._prog)) {
+        try { gl.deleteProgram(this._prog[k].program); } catch (_) {}
+      }
+      this._prog = null;
+    }
+
+    const doubles = ['velocity', 'dye', 'pressure'];
+    const singles = ['divergence', 'curl', 'velTmpFwd', 'velTmpBak',
+                     'dyeTmpFwd', 'dyeTmpBak', 'viscB', 'bloomFBO', 'bloomTemp'];
+    for (const k of doubles) { destroyDoubleFBO(gl, this[k]); this[k] = null; }
+    for (const k of singles) { destroyFBO(gl, this[k]);       this[k] = null; }
+
+    if (this._quad) {
+      try { gl.deleteBuffer(this._quad.vbo);    } catch (_) {}
+      try { gl.deleteVertexArray(this._quad.vao); } catch (_) {}
+      this._quad = null;
+    }
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -439,11 +473,14 @@ export class FluidSimulation {
     // imperceptible anyway so we skip the whole solve.
     if (alpha < 1e-3) return;
 
-    // Cap iteration count at low α — a few iterations are enough when the
-    // operator is close to identity; above α≈0.5 we want the full count to
-    // converge.
+    // Iteration scheduling: at small α the operator is close to identity
+    // and 4 passes suffice. At large α the spectral radius approaches 1 so
+    // residual decays slowly; bump the cap up to 40 iterations to keep
+    // reduction per frame around 50% even at the slider top (α≈14).
+    const baseCap   = config.VISCOSITY_ITERATIONS;
+    const stretched = alpha > 5 ? Math.max(baseCap, 40) : baseCap;
     const iters = Math.max(4, Math.min(
-      config.VISCOSITY_ITERATIONS,
+      stretched,
       Math.ceil(2 + 18 * Math.min(1, alpha * 4))
     ));
 
