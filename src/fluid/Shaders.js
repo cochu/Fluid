@@ -310,19 +310,29 @@ void main() {
 export const VISCOSITY_FRAG = /* glsl */`#version 300 es
 precision highp float;
 precision highp sampler2D;
-in vec2 vUv;
-in vec2 vL; in vec2 vR; in vec2 vT; in vec2 vB;
 uniform sampler2D uX;
 uniform sampler2D uB;
 uniform float uAlpha;   // ν · Δt · N² (dimensionless)
 out vec4 fragColor;
 
+// IMPORTANT: use texelFetch (point sampling at exact cell centres) instead of
+// the bilinear texture() reads. The interpolated varyings vL/vR/vT/vB sit at
+// pixel centres in theory, but tiny rounding slop on some GPUs produces a
+// stable grid imprint after 20 Jacobi iterations — particularly visible at
+// very low ν where each pass is essentially an identity copy. Point sampling
+// removes this class of artefact entirely.
 void main() {
-    vec4 xL = texture(uX, vL);
-    vec4 xR = texture(uX, vR);
-    vec4 xT = texture(uX, vT);
-    vec4 xB = texture(uX, vB);
-    vec4 b  = texture(uB, vUv);
+    ivec2 p = ivec2(gl_FragCoord.xy);
+    ivec2 sz = textureSize(uX, 0);
+    ivec2 pL = ivec2(max(p.x - 1, 0),         p.y);
+    ivec2 pR = ivec2(min(p.x + 1, sz.x - 1),  p.y);
+    ivec2 pB = ivec2(p.x, max(p.y - 1, 0));
+    ivec2 pT = ivec2(p.x, min(p.y + 1, sz.y - 1));
+    vec4 xL = texelFetch(uX, pL, 0);
+    vec4 xR = texelFetch(uX, pR, 0);
+    vec4 xT = texelFetch(uX, pT, 0);
+    vec4 xB = texelFetch(uX, pB, 0);
+    vec4 b  = texelFetch(uB, p,  0);
     fragColor = (b + uAlpha * (xL + xR + xT + xB)) / (1.0 + 4.0 * uAlpha);
 }
 `;
@@ -660,11 +670,25 @@ uniform sampler2D uPositions;
 uniform ivec2     uTexSize;    // (width, height) of position texture
 uniform float     uPointSize;  // base point size in pixels
 uniform vec2      uCanvasSize; // (width, height) of the canvas in CSS pixels
+uniform float     uTime;       // seconds, drives micro-jitter
 
 out float vLifetime;
 out vec2  vVelocity;
+out vec2  vVelDir;
+out float vSeed;
 
 uniform sampler2D uVelocity;
+
+// Cheap deterministic hash — gives each particle a stable [0,1) seed
+// derived from its index so its shimmer phase doesn't sync with others.
+float hash11(uint n) {
+    n = (n ^ 61u) ^ (n >> 16);
+    n *= 9u;
+    n = n ^ (n >> 4);
+    n *= 0x27d4eb2du;
+    n = n ^ (n >> 15);
+    return float(n & 0x00FFFFFFu) / float(0x01000000u);
+}
 
 void main() {
     int  idx = gl_VertexID;
@@ -675,12 +699,22 @@ void main() {
     vec2  pos      = p.xy;
     float lifetime = p.z;
     vLifetime      = lifetime;
-    vVelocity      = texture(uVelocity, pos).xy;
+    vSeed          = hash11(uint(idx));
+    vec2 vel       = texture(uVelocity, pos).xy;
+    vVelocity      = vel;
+    float spd      = length(vel);
+    vVelDir        = spd > 5e-4 ? vel / spd : vec2(0.0, 1.0);
 
     // UV [0,1] → NDC [-1,1]. The fluid display & splat both treat UV.y=1
     // as the top of the screen, so particles must follow the same convention
     // (no extra Y flip) to react consistently to the velocity field.
     vec2 clip   = pos * 2.0 - 1.0;
+
+    // Micro-shimmer — a sub-pixel oscillation that suggests a living medium.
+    // Per-particle phase from a cheap hash so neighbours don't wobble in sync.
+    float phase = dot(pos, vec2(37.1, 19.3));
+    clip += 0.0012 * vec2(sin(uTime * 11.3 + phase),
+                          cos(uTime *  9.7 + phase));
 
     if (lifetime <= 0.0) {
         // Hide dormant particles off-screen instead of drawing them at (0,0).
@@ -690,37 +724,78 @@ void main() {
     }
 
     gl_Position = vec4(clip, 0.0, 1.0);
-    // Scale point size with lifetime and velocity magnitude
-    float speed = length(vVelocity);
-    gl_PointSize = uPointSize * lifetime * (1.0 + speed * 2.0);
+    // Scale point size with lifetime and velocity magnitude — fast
+    // particles get visibly bigger so streaks read as droplets.
+    gl_PointSize = uPointSize * (0.7 + 0.3 * lifetime) * (1.0 + spd * 2.5);
 }
 `;
 
 /**
  * Particle render – FRAGMENT shader.
  *
- * Renders each particle as a soft glowing circle using gl_PointCoord.
+ * "Aquatic droplet" look:
+ *   - velocity-direction stretch (teardrop)
+ *   - speed → cyan/blue gradient (deep sea → foam)
+ *   - faux caustic ring shimmer using uTime + per-particle seed
+ *   - fresnel-style rim
+ *   - speed-driven motion-blur softening (fast droplet = soft edge)
  */
 export const PARTICLE_RENDER_FRAG = /* glsl */`#version 300 es
 precision highp float;
 
 in float vLifetime;
 in vec2  vVelocity;
+in vec2  vVelDir;
+in float vSeed;
 
-uniform vec3 uColor;
+uniform vec3  uColor;     // accent tint (multiplied into the gradient)
+uniform float uTime;      // seconds, drives the caustic shimmer
+uniform float uTintMix;   // 0 = pure aqua palette, 1 = blend with uColor
 
 out vec4 fragColor;
 
 void main() {
-    // Soft circle
-    vec2  d     = gl_PointCoord - 0.5;
-    float dist  = length(d);
-    float alpha = (1.0 - smoothstep(0.25, 0.5, dist)) * vLifetime;
+    vec2  d   = gl_PointCoord - 0.5;
 
-    // Subtle speed-based brightness boost (clamped so we don't blow out the image)
-    float speedMul = 1.0 + clamp(length(vVelocity) * 0.05, 0.0, 2.0);
-    vec3  colour   = uColor * speedMul * vLifetime;
+    // Anisotropic distance: stretch along the local flow direction so fast
+    // particles read as elongated droplets / streaks.
+    float along   = dot(d,  vVelDir);
+    float across  = dot(d, vec2(-vVelDir.y, vVelDir.x));
+    float speed   = length(vVelocity);
+    float stretch = 1.0 + clamp(speed * 0.30, 0.0, 1.2);
+    // Forward-shift so the head is rounder than the tail.
+    float dist    = length(vec2(along / stretch - 0.04 * (stretch - 1.0), across));
 
-    fragColor = vec4(colour, alpha);
+    // Speed-driven aqua gradient. Slow → deep ocean blue, fast → foamy cyan.
+    float t        = clamp(speed * 0.22, 0.0, 1.0);
+    vec3  slow     = vec3(0.04, 0.20, 0.55);
+    vec3  fast     = vec3(0.65, 0.95, 1.00);
+    vec3  aqua     = mix(slow, fast, t * t);
+    vec3  base     = mix(aqua, aqua * (uColor + 0.001) * 1.6, uTintMix);
+
+    // Caustic ring — a thin bright annulus at a slowly-jittering radius
+    // mimics underwater refractive light specks. vSeed is per-particle
+    // stable, so neighbours have decorrelated phases.
+    float causticR = 0.26 + 0.05 * sin(uTime * 5.8 + vSeed * 6.28);
+    float ring     = exp(-pow(dist - causticR, 2.0) * 220.0) * 0.50;
+
+    // Fresnel-like rim — bright thin edge that suggests a refracting droplet.
+    float rim      = pow(smoothstep(0.30, 0.50, dist), 3.0) * 0.40;
+    vec3  rimCol   = vec3(0.78, 0.97, 1.00);
+
+    // Speed-driven motion-blur softening: fast droplets read as streaked,
+    // slow droplets stay crisp. (We can't use lifetime here because the
+    // current particle update doesn't decay it.)
+    float softEdge = mix(0.46, 0.30, clamp(speed * 0.20, 0.0, 1.0));
+    float core     = (1.0 - smoothstep(0.10, softEdge, dist));
+
+    // Compose
+    float alpha    = clamp(core + ring + rim, 0.0, 1.0);
+    vec3  rgb      = base * core + rimCol * (ring + rim);
+
+    if (alpha < 0.01) discard;
+    // Premultiply alpha so we can use (ONE, ONE_MINUS_SRC_ALPHA) blending
+    // in main.js and not double-attenuate rgb.
+    fragColor = vec4(rgb * alpha, alpha);
 }
 `;

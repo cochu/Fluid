@@ -50,7 +50,7 @@ export const CONFIG = {
   SPLAT_RADIUS: 0.28,
 
   /** Force magnitude applied on pointer drag. */
-  SPLAT_FORCE: 3000,
+  SPLAT_FORCE: 1500,
 
   /* ── Visuals ──────────────────────────────────────────────────────── */
   COLORFUL: true,
@@ -79,8 +79,8 @@ export const CONFIG = {
    */
   PARTICLE_LIFETIME: 5.0,
 
-  /** Render point size (px, before DPR scaling). */
-  PARTICLE_SIZE: 1.5,
+  /** Render point size (px, before DPR scaling). Larger = more aquatic blob. */
+  PARTICLE_SIZE: 3.0,
 
   /**
    * Fraction of particles relocated to the cursor on each "drop" frame
@@ -114,29 +114,38 @@ export const CONFIG = {
    */
   AUDIO_REACTIVE: false,
 
-  /** Bass band lower bound (Hz) used to detect kicks / sub-bass. */
-  AUDIO_BASS_LOW_HZ: 20,
-  /** Bass band upper bound (Hz). 200 captures the body of a kick drum. */
-  AUDIO_BASS_HIGH_HZ: 200,
+  /** Bass band (Hz). Body of a kick drum / sub. Drives soft corner pulses. */
+  AUDIO_BASS_LOW_HZ: 30,
+  AUDIO_BASS_HIGH_HZ: 180,
+  /** Mids band (Hz). Snares / vocals. Drives counter-rotating vortex pairs. */
+  AUDIO_MIDS_LOW_HZ: 300,
+  AUDIO_MIDS_HIGH_HZ: 2200,
+  /** Highs band (Hz). Hi-hats / cymbals. Drives small dye-only sparkles. */
+  AUDIO_HIGHS_LOW_HZ: 4000,
+  AUDIO_HIGHS_HIGH_HZ: 12000,
 
-  /**
-   * Beat trigger threshold expressed as a multiplier over the slow
-   * adaptive baseline. 1.4–2.0 works well in typical rooms.
-   */
-  AUDIO_SENSITIVITY: 1.55,
+  /** Beat thresholds — multiplier over the slow adaptive baseline. */
+  AUDIO_SENSITIVITY:        1.55,   // legacy / bass
+  AUDIO_MIDS_SENSITIVITY:   1.45,
+  AUDIO_HIGHS_SENSITIVITY:  1.65,
 
-  /** Absolute lower bound on smoothed bass energy (0..1). Below this we
-   *  consider the room silent and never trigger, regardless of ratio. */
-  AUDIO_NOISE_FLOOR: 0.06,
+  /** Absolute lower bound on smoothed band energy (0..1). */
+  AUDIO_NOISE_FLOOR:        0.05,
+  AUDIO_MIDS_NOISE_FLOOR:   0.04,
+  AUDIO_HIGHS_NOISE_FLOOR:  0.03,
 
-  /** Minimum gap between consecutive rings (ms). Prevents smearing on
-   *  sustained bass and roughly caps trigger rate at 5 Hz. */
-  AUDIO_REFRACTORY_MS: 180,
+  /** Refractory windows (ms) – cap trigger rate per band. */
+  AUDIO_REFRACTORY_MS:        220,
+  AUDIO_MIDS_REFRACTORY_MS:   140,
+  AUDIO_HIGHS_REFRACTORY_MS:   90,
 
-  /** Extra gain applied on top of SPLAT_FORCE for audio-triggered rings. */
-  AUDIO_GAIN: 0.85,
+  /** Per-band gains. Bass is intentionally soft (< 0.3) — earlier versions
+   *  multiplied the user's SPLAT_FORCE by ~1× and felt violent. */
+  AUDIO_GAIN:        0.22,   // bass corner-pulse gain
+  AUDIO_MIDS_GAIN:   0.55,   // mids vortex-pair gain
+  AUDIO_HIGHS_GAIN:  0.18,   // highs sparkle dye intensity
 
-  /** Number of radial splats emitted per detected beat (more = rounder
-   *  ring, but each splat is a fragment shader pass — keep it modest). */
-  AUDIO_SPLAT_COUNT: 16,
+  /** Number of splats per bass ring (lowered from 16 — corner pulses are
+   *  cheaper and the four positions already shape the wave). */
+  AUDIO_SPLAT_COUNT: 6,
 };

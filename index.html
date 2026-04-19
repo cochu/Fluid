@@ -19,44 +19,44 @@
 
   <div id="ui-overlay">
     <div class="ui-panel" id="ui-panel">
-      <button id="btn-reset" class="ui-btn" title="Reset simulation" aria-label="Reset">↺</button>
-      <button id="btn-particles" class="ui-btn active" title="Toggle particles" aria-label="Particles">✦</button>
-      <button id="btn-spawn" class="ui-btn ui-btn-drag" title="Drop particles — drag onto canvas" aria-label="Drop particles" draggable="false">💧</button>
-      <button id="btn-bloom" class="ui-btn active" title="Toggle bloom" aria-label="Bloom">✺</button>
-      <button id="btn-colorful" class="ui-btn active" title="Toggle colorful" aria-label="Color">◐</button>
-      <button id="btn-audio" class="ui-btn" title="Audio reactivity (microphone)" aria-label="Audio reactivity">🎤</button>
+      <button id="btn-reset" class="ui-btn" data-tip="Reset" aria-label="Reset">↺</button>
+      <button id="btn-particles" class="ui-btn active" data-tip="Particles on/off" aria-label="Particles">✦</button>
+      <button id="btn-spawn" class="ui-btn ui-btn-drag onboard" data-tip="Drag onto canvas to spawn droplets" aria-label="Drop particles" draggable="false">💧</button>
+      <button id="btn-bloom" class="ui-btn active" data-tip="Bloom glow" aria-label="Bloom">✺</button>
+      <button id="btn-colorful" class="ui-btn active" data-tip="Auto hue cycle" aria-label="Color">◐</button>
+      <button id="btn-audio" class="ui-btn" data-tip="Microphone reactivity" aria-label="Audio reactivity">🎤</button>
+      <button id="btn-pause" class="ui-btn" data-tip="Pause (space)" aria-label="Pause">⏸</button>
+      <button id="btn-snapshot" class="ui-btn" data-tip="Save snapshot (PNG)" aria-label="Save snapshot">📷</button>
 
       <div class="ui-slider-group">
         <label for="slider-force">Force</label>
-        <input type="range" id="slider-force" min="100" max="10000" value="3000" step="50" aria-label="Force">
+        <input type="range" id="slider-force" min="0" max="100" value="50" step="1" data-tip="Splat force" aria-label="Force">
       </div>
 
       <div class="ui-slider-group">
-        <label for="slider-particles">Particles</label>
-        <input type="range" id="slider-particles" min="500" max="10000" value="5000" step="500" aria-label="Particle count">
-      </div>
-
-      <div class="ui-slider-group">
-        <label for="slider-dissipation">Dissipation</label>
-        <input type="range" id="slider-dissipation" min="0" max="100" value="82" step="1" aria-label="Dissipation">
+        <label for="slider-dissipation">Persistence</label>
+        <input type="range" id="slider-dissipation" min="0" max="100" value="65" step="1" data-tip="How long dye/velocity persist" aria-label="Persistence">
       </div>
 
       <div class="ui-slider-group">
         <label for="slider-viscosity">Viscosity</label>
-        <input type="range" id="slider-viscosity" min="0" max="100" value="0" step="1" aria-label="Viscosity">
+        <input type="range" id="slider-viscosity" min="0" max="100" value="0" step="1" data-tip="Honey-like thickness" aria-label="Viscosity">
       </div>
 
-      <button id="btn-hq-advect" class="ui-btn active" title="High-quality (MacCormack) advection" aria-label="High-quality advection">≈</button>
+      <button id="btn-hq-advect" class="ui-btn active" data-tip="High-quality advection (MacCormack)" aria-label="High-quality advection">≈</button>
 
-      <button id="btn-perf" class="ui-btn" title="Performance mode" aria-label="Performance mode">⚡</button>
+      <button id="btn-perf" class="ui-btn" data-tip="Performance mode" aria-label="Performance mode">⚡</button>
     </div>
 
     <div id="fps-counter" aria-live="polite" aria-label="FPS counter">-- FPS</div>
+    <div id="version-tag" aria-hidden="true"></div>
+    <div id="tooltip" role="tooltip" aria-hidden="true"></div>
   </div>
 
   <div id="webgl-error" class="hidden">
     <p>WebGL2 is required but not supported by your browser. Please use a modern browser.</p>
   </div>
+  <div id="snapshot-flash" aria-hidden="true"></div>
 
   <script type="module" src="src/main.js"></script>
 

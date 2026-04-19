@@ -47,12 +47,19 @@ export class AudioReactivity {
     this._source    = null;   // MediaStreamAudioSourceNode
     this._freqData  = null;   // Uint8Array – FFT magnitude buffer
 
-    /** Smoothed running baseline of the bass-band energy (0..1). */
-    this._baseline   = 0.05;
-    /** Smoothed instantaneous bass energy (0..1). */
-    this._smoothed   = 0;
-    /** Timestamp (ms) of the last beat we emitted. Used for refractory. */
-    this._lastBeatMs = 0;
+    /** Per-band envelope follower state. Each entry holds the smoothed
+     *  instantaneous level (`env`), slow adaptive baseline (`base`) and
+     *  the timestamp of the last trigger (`lastMs`).
+     *  - `envSmooth` is the EMA retention coefficient for the fast envelope
+     *    (closer to 1 = slower response). Tuned per band so highs follow
+     *    transients faster than sustained low-frequency rumble.
+     *  - `baseSmooth` is the retention coefficient for the slow adaptive
+     *    baseline. */
+    this._bands = {
+      bass:  { lo: 'AUDIO_BASS_LOW_HZ',  hi: 'AUDIO_BASS_HIGH_HZ',  env: 0, base: 0.05, lastMs: 0, envSmooth: 0.55, baseSmooth: 0.985 },
+      mids:  { lo: 'AUDIO_MIDS_LOW_HZ',  hi: 'AUDIO_MIDS_HIGH_HZ',  env: 0, base: 0.05, lastMs: 0, envSmooth: 0.45, baseSmooth: 0.978 },
+      highs: { lo: 'AUDIO_HIGHS_LOW_HZ', hi: 'AUDIO_HIGHS_HIGH_HZ', env: 0, base: 0.04, lastMs: 0, envSmooth: 0.30, baseSmooth: 0.965 },
+    };
 
     /** Resolved when audio is fully running, rejected on failure. */
     this._readyP = null;
@@ -140,85 +147,103 @@ export class AudioReactivity {
       this._ctx = null;
     }
     this._freqData   = null;
-    this._smoothed   = 0;
-    this._baseline   = 0.05;
-    this._lastBeatMs = 0;
+    for (const b of Object.values(this._bands)) {
+      b.env = 0; b.base = 0.05; b.lastMs = 0;
+    }
   }
 
   /**
-   * Drive one frame of analysis and emit a radial speaker-wave when a
-   * bass beat is detected. Should be called from the main animation
-   * loop; cheap when audio is inactive.
+   * Compute and update one band's envelope. Returns the smoothed
+   * instantaneous energy (0..1) and writes it back into `band`.
+   * @private
+   */
+  _updateBand(band, binHz) {
+    const cfg  = this._config;
+    const lo   = Math.max(1, Math.floor(cfg[band.lo] / binHz));
+    const hi   = Math.min(this._freqData.length - 1, Math.ceil(cfg[band.hi] / binHz));
+    let sum = 0;
+    for (let i = lo; i <= hi; i++) sum += this._freqData[i];
+    const energy = (sum / Math.max(1, hi - lo + 1)) / 255;
+    band.env  = band.env  * band.envSmooth  + energy   * (1 - band.envSmooth);
+    band.base = band.base * band.baseSmooth + band.env * (1 - band.baseSmooth);
+    return band.env;
+  }
+
+  /**
+   * Drive one frame of analysis and emit splats per audio band when
+   * beats are detected. Should be called from the main animation loop;
+   * cheap when audio is inactive.
    *
    * @param {number} nowMs `performance.now()` of the current frame
    */
   tick(nowMs) {
     if (!this.isActive || !this._analyser || !this._freqData) return;
-    if (!this._config.AUDIO_REACTIVE) return;
-
     const cfg = this._config;
+    if (!cfg.AUDIO_REACTIVE) return;
+
     this._analyser.getByteFrequencyData(this._freqData);
+    const binHz = this._ctx.sampleRate / this._analyser.fftSize;
 
-    // ── 1. Average energy across the bass band ─────────────────────
-    const sr        = this._ctx.sampleRate;
-    const binHz     = sr / this._analyser.fftSize;
-    const lo        = Math.max(1, Math.floor(cfg.AUDIO_BASS_LOW_HZ  / binHz));
-    const hi        = Math.min(this._freqData.length - 1,
-                               Math.ceil (cfg.AUDIO_BASS_HIGH_HZ / binHz));
-    let sum = 0;
-    for (let i = lo; i <= hi; i++) sum += this._freqData[i];
-    const energy = (sum / Math.max(1, hi - lo + 1)) / 255; // 0..1
+    const bass  = this._updateBand(this._bands.bass,  binHz);
+    const mids  = this._updateBand(this._bands.mids,  binHz);
+    const highs = this._updateBand(this._bands.highs, binHz);
 
-    // ── 2. Smooth instantaneous + slow adaptive baseline ───────────
-    //
-    // `_smoothed`  – fast EMA, follows transients (attack ≈ a few frames)
-    // `_baseline`  – slow EMA, follows ambient room noise so a shouted
-    //                conversation doesn't trigger but a kick-drum does.
-    this._smoothed = this._smoothed * 0.55 + energy * 0.45;
-    this._baseline = this._baseline * 0.985 + this._smoothed * 0.015;
+    // ── Bass: four soft corner pulses pushing inward. Reads as a
+    //    "breathing" pressure wave instead of a violent center burst. ──
+    if (bass > cfg.AUDIO_NOISE_FLOOR
+        && bass > this._bands.bass.base * cfg.AUDIO_SENSITIVITY
+        && (nowMs - this._bands.bass.lastMs) > cfg.AUDIO_REFRACTORY_MS) {
+      this._bands.bass.lastMs = nowMs;
+      const headroom = Math.min(2.5, bass / Math.max(0.01, this._bands.bass.base));
+      const mag      = cfg.SPLAT_FORCE * cfg.AUDIO_GAIN * headroom;
+      const hue   = (nowMs * 0.0001) % 1;
+      const color = hsvToRgb(hue, 0.55, cfg.DYE_BRIGHTNESS * 0.9);
+      // Four corner anchors push toward the centre — produces a
+      // converging round wave that meets in the middle.
+      const corners = [[0.15, 0.15], [0.85, 0.15], [0.85, 0.85], [0.15, 0.85]];
+      for (const [x, y] of corners) {
+        const dx = (0.5 - x) * mag * 0.45;
+        const dy = (0.5 - y) * mag * 0.45;
+        this._splat(x, y, dx, dy, color);
+      }
+    }
 
-    // ── 3. Beat detection ──────────────────────────────────────────
-    const sens     = cfg.AUDIO_SENSITIVITY;          // multiplier over baseline
-    const floor    = cfg.AUDIO_NOISE_FLOOR;          // ignore total silence
-    const refract  = cfg.AUDIO_REFRACTORY_MS;        // min gap between rings
-    const isBeat   = this._smoothed > floor
-                   && this._smoothed > this._baseline * sens
-                   && (nowMs - this._lastBeatMs) > refract;
+    // ── Mids: a counter-rotating vortex pair at random positions.
+    //    Snares and vocals carve swirls instead of pulses. ──
+    if (mids > cfg.AUDIO_MIDS_NOISE_FLOOR
+        && mids > this._bands.mids.base * cfg.AUDIO_MIDS_SENSITIVITY
+        && (nowMs - this._bands.mids.lastMs) > cfg.AUDIO_MIDS_REFRACTORY_MS) {
+      this._bands.mids.lastMs = nowMs;
+      const headroom = Math.min(2.0, mids / Math.max(0.01, this._bands.mids.base));
+      const mag      = cfg.SPLAT_FORCE * cfg.AUDIO_MIDS_GAIN * headroom;
+      const cx = 0.25 + Math.random() * 0.5;
+      const cy = 0.25 + Math.random() * 0.5;
+      const sep = 0.05;
+      const ang = Math.random() * Math.PI * 2;
+      const ox = Math.cos(ang) * sep, oy = Math.sin(ang) * sep;
+      // Two splats with opposite tangential pushes form a vortex pair.
+      const tx = -Math.sin(ang) * mag, ty = Math.cos(ang) * mag;
+      const hue = (nowMs * 0.00025 + 0.4) % 1;
+      const color = hsvToRgb(hue, 0.75, cfg.DYE_BRIGHTNESS);
+      this._splat(cx + ox, cy + oy,  tx,  ty, color);
+      this._splat(cx - ox, cy - oy, -tx, -ty, color);
+    }
 
-    if (!isBeat) return;
-    this._lastBeatMs = nowMs;
-
-    // ── 4. Emit a radial burst from canvas center ──────────────────
-    //
-    // Magnitude scales super-linearly with the headroom over baseline so
-    // a stronger kick produces a visibly larger ring. The user-facing
-    // SPLAT_FORCE slider still acts as a global gain.
-    const headroom = Math.min(3.0, this._smoothed / Math.max(0.01, this._baseline));
-    const mag      = cfg.SPLAT_FORCE * cfg.AUDIO_GAIN * headroom;
-
-    const n = cfg.AUDIO_SPLAT_COUNT | 0;
-    // Random phase offset so successive rings don't perfectly overlap
-    // (avoids a stationary aliasing pattern on sustained bass).
-    const phase = Math.random() * Math.PI * 2;
-
-    // Pick a single colour per ring so the wave reads as one event,
-    // and cycle the hue from the audio energy itself.
-    const hue = (nowMs * 0.0002 + this._smoothed * 4) % 1;
-    const color = hsvToRgb(hue, 0.9, cfg.DYE_BRIGHTNESS * (1 + headroom));
-
-    for (let i = 0; i < n; i++) {
-      const a  = phase + (i / n) * Math.PI * 2;
-      const dx = Math.cos(a) * mag;
-      const dy = Math.sin(a) * mag;
-      // Splats originate from a tiny ring around the centre rather than
-      // a single point – this gives the solver an actual circular
-      // pressure source instead of a spike that would advect into a
-      // cross. The radius is small so the resulting wave still looks
-      // centered on the screen.
-      const r  = 0.02;
-      const x  = 0.5 + Math.cos(a) * r;
-      const y  = 0.5 + Math.sin(a) * r;
-      this._splat(x, y, dx, dy, color);
+    // ── Highs: tiny dye-only sparkles. Zero velocity = no kick to the
+    //    flow, just bright pinpricks that catch the eye on hi-hats. ──
+    if (highs > cfg.AUDIO_HIGHS_NOISE_FLOOR
+        && highs > this._bands.highs.base * cfg.AUDIO_HIGHS_SENSITIVITY
+        && (nowMs - this._bands.highs.lastMs) > cfg.AUDIO_HIGHS_REFRACTORY_MS) {
+      this._bands.highs.lastMs = nowMs;
+      const n = 3;
+      const hue = (nowMs * 0.0007) % 1;
+      const color = hsvToRgb(hue, 0.25, cfg.DYE_BRIGHTNESS * (1 + cfg.AUDIO_HIGHS_GAIN));
+      for (let i = 0; i < n; i++) {
+        const x = Math.random();
+        const y = Math.random();
+        // dx=dy=0: pure dye, no momentum.
+        this._splat(x, y, 0, 0, color);
+      }
     }
   }
 }

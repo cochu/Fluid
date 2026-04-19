@@ -158,7 +158,10 @@ export class FluidSimulation {
       this._advect(this.velocity, this.velocity, config.VELOCITY_DISSIPATION, dt);
     }
 
-    // 4. Implicit viscous diffusion (skipped when ν = 0, zero cost)
+    // 4. Implicit viscous diffusion. Skipped when ν = 0 (zero cost) AND when
+    //    the resulting α would be below a noise floor — running 20 Jacobi
+    //    iterations for an essentially-identity transform was the root cause
+    //    of a faint grid pattern at very low ν.
     if (config.VISCOSITY > 0) {
       this._applyViscosity(dt);
     }
@@ -430,7 +433,19 @@ export class FluidSimulation {
     const { gl, config } = this;
     const N      = this.velocity.width;
     const alpha  = config.VISCOSITY * dt * (N * N);
-    if (alpha <= 0) return;
+    // Early-out below the noise floor: 20 Jacobi passes that each only
+    // perturb the field by < 1 ULP of fp16/fp32 simply etch the texel grid
+    // into the velocity texture. Below α≈1e-3 the visible diffusion is
+    // imperceptible anyway so we skip the whole solve.
+    if (alpha < 1e-3) return;
+
+    // Cap iteration count at low α — a few iterations are enough when the
+    // operator is close to identity; above α≈0.5 we want the full count to
+    // converge.
+    const iters = Math.max(4, Math.min(
+      config.VISCOSITY_ITERATIONS,
+      Math.ceil(2 + 18 * Math.min(1, alpha * 4))
+    ));
 
     // 1. Snapshot the advected velocity into the immutable RHS texture.
     {
@@ -446,7 +461,7 @@ export class FluidSimulation {
     gl.uniform2f(uniforms.uTexelSize, this.velocity.texelSizeX, this.velocity.texelSizeY);
     gl.uniform1f(uniforms.uAlpha, alpha);
     gl.uniform1i(uniforms.uB, this.viscB.attach(1));
-    for (let i = 0; i < config.VISCOSITY_ITERATIONS; i++) {
+    for (let i = 0; i < iters; i++) {
       gl.uniform1i(uniforms.uX, this.velocity.read.attach(0));
       this._blit(this.velocity.write.fbo, this.velocity.write.width, this.velocity.write.height);
       this.velocity.swap();

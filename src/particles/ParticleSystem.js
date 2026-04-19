@@ -36,6 +36,7 @@ export class ParticleSystem {
     this._posFBO   = null;  // double FBO for ping-pong
     this._indexBuf = null;
     this._randSeed = 0;
+    this._t0       = performance.now();
 
     this._compilePrograms();
     this._init(config.PARTICLE_COUNT);
@@ -197,7 +198,19 @@ export class ParticleSystem {
     gl.uniform2i(uniforms.uTexSize,    this._texW, this._texH);
     gl.uniform1f(uniforms.uPointSize,  config.PARTICLE_SIZE * window.devicePixelRatio);
     gl.uniform2f(uniforms.uCanvasSize, canvasW, canvasH);
-    gl.uniform3f(uniforms.uColor,      1.0, 1.0, 1.0);
+    gl.uniform1f(uniforms.uTime,       (performance.now() - this._t0) * 0.001);
+    // When COLORFUL is on we let the fluid's hue cycling tint the droplets;
+    // otherwise we stay on the pure aqua palette so the visual reads as water.
+    const tint = config.COLORFUL ? 0.55 : 0.0;
+    gl.uniform1f(uniforms.uTintMix,    tint);
+    // Hue picker — slow rotation so droplets re-tint over time without
+    // strobing. Drives uColor used by the fragment when uTintMix > 0.
+    const tSec = (performance.now() - this._t0) * 0.001;
+    const h = (tSec * 0.05) % 1;
+    const r = 0.5 + 0.5 * Math.cos(2 * Math.PI * (h + 0.00));
+    const g = 0.5 + 0.5 * Math.cos(2 * Math.PI * (h + 0.33));
+    const b = 0.5 + 0.5 * Math.cos(2 * Math.PI * (h + 0.66));
+    gl.uniform3f(uniforms.uColor,      r, g, b);
 
     // Render as points (no VAO needed — we rely on gl_VertexID)
     gl.bindVertexArray(null);

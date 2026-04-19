@@ -16,6 +16,11 @@ import { ParticleSystem }   from './particles/ParticleSystem.js';
 import { InputHandler }     from './input/InputHandler.js';
 import { UI }               from './ui/UI.js';
 import { AudioReactivity }  from './audio/AudioReactivity.js';
+import { BUILD_VERSION }    from './version.js';
+
+// Expose the build identifier early so the UI version tag (and any
+// console snooping) can pick it up without an explicit import.
+window.__FLUID_BUILD__ = BUILD_VERSION;
 
 // One-line WebGPU capability probe. The simulation still runs on WebGL2
 // (a full WebGPU port is a separate, much larger effort), but logging the
@@ -86,55 +91,62 @@ function handleSplat(x, y, dx, dy, color) {
    ────────────────────────────────────────────────────────────────────── */
 
 const ui = new UI(CONFIG, {
-  onReset() {
-    fluid.reset();
-  },
-  onToggleParticles(on) {
-    // Nothing extra needed – the render loop checks CONFIG.PARTICLES
-  },
-  onToggleBloom(on) {
-    // Nothing extra needed
-  },
-  onToggleColorful(on) {
-    // Nothing extra needed
-  },
+  onReset() { fluid.reset(); },
+  onToggleParticles(on) {},
+  onToggleBloom(on) {},
+  onToggleColorful(on) {},
   onTogglePerfMode(perfMode) {
-    // Recreate simulation FBOs at the new resolution
     fluid     = new FluidSimulation(gl, ext, CONFIG);
     particles = new ParticleSystem(gl, ext, CONFIG);
   },
-  onForceChange(v) {
-    // CONFIG already updated by UI
-  },
-  onParticleCountChange(v) {
-    CONFIG.PARTICLE_COUNT = v;
-    particles.resize(v);
-  },
-  onDissipationChange(v) {
-    // CONFIG already updated by UI
-  },
+  onForceChange(v) {},
+  onDissipationChange(v) {},
   onParticleDrop(x, y) {
-    // Coalesce multiple events per frame into a single GPU pass
     pendingDrop = { x, y };
+  },
+  onPauseChange(_paused) { /* render loop checks CONFIG.PAUSED */ },
+  onSnapshot() {
+    saveSnapshot();
   },
   async onToggleAudio(want) {
     if (want) {
-      try {
-        await audio.start();
-        return true;
-      } catch (err) {
-        // Surface the failure to the UI so it can show the denied state.
-        throw err;
-      }
-    } else {
-      audio.stop();
-      return false;
+      try { await audio.start(); return true; }
+      catch (err) { throw err; }
     }
+    audio.stop();
+    return false;
   },
 });
 
 /** Most recent particle drop request from the UI; consumed in animate(). */
 let pendingDrop = null;
+
+/* ──────────────────────────────────────────────────────────────────────
+   5b. Snapshot export — render one frame off-loop and save as PNG.
+   --------------------------------------------------------------------
+   The animation loop clears between frames, so we have to take the
+   snapshot *immediately* after a normal frame finishes. We do that by
+   setting a flag; the loop reads it after rendering and snapshots.
+   ────────────────────────────────────────────────────────────────────── */
+
+let snapshotPending = false;
+function saveSnapshot() { snapshotPending = true; }
+
+function doSnapshot() {
+  // Use canvas.toBlob (async, lower memory than toDataURL).
+  const v = ui.version || 'dev';
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const name = `fluid-${v}-${ts}.png`;
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    ui.flashSnapshot();
+  }, 'image/png');
+}
 
 /* ──────────────────────────────────────────────────────────────────────
    5b. Audio reactivity (microphone-driven radial speaker waves)
@@ -238,9 +250,19 @@ function animate(now) {
   // Draw particles on top with additive blending
   if (CONFIG.PARTICLES) {
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE);   // additive – bright on dark bg
+    // Particle frag outputs premultiplied rgba (rgb already includes
+    // alpha). (ONE, ONE_MINUS_SRC_ALPHA) layers softly over the dye
+    // without the over-saturation pure additive produced.
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     particles.render(canvas.width, canvas.height, fluid.velocityTexture);
     gl.disable(gl.BLEND);
+  }
+
+  // Take snapshot right after rendering this frame, before the next
+  // requestAnimationFrame would otherwise clear the canvas.
+  if (snapshotPending) {
+    snapshotPending = false;
+    doSnapshot();
   }
 
   // ── FPS counter ────────────────────────────────────────────────────
