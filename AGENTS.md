@@ -43,6 +43,14 @@ one almost always re-introduces a known regression — see [`docs/agents/gotchas
 7. **Comments only when they add information.** This repo has a deliberate
    style: explain *why* (or *what regression this fix prevents*), never *what*.
    See [`docs/agents/conventions.md`](docs/agents/conventions.md#comments).
+8. **Use the BMAD-Fluid dream team for non-trivial changes.** Pick at least
+   2–4 personas from [`docs/agents/personas/`](docs/agents/personas/), invoke
+   them via rubber-duck *before* implementing, and again on the diff. See
+   [`docs/agents/method.md`](docs/agents/method.md).
+9. **Every commit message body must contain a short poem on the beauty of
+   fluids.** Block prefixed with `~~~ on fluids ~~~`, placed before the
+   `Co-authored-by` trailer. This is the comprehension check — see
+   [`docs/agents/method.md#4-the-poem-requirement`](docs/agents/method.md#4-the-poem-requirement-the-real-review-comprehension-test).
 
 ---
 
@@ -75,6 +83,14 @@ one almost always re-introduces a known regression — see [`docs/agents/gotchas
 Each sub-doc is self-contained. **Don't load all of them up-front.** Pick the
 one(s) that match your task:
 
+- **[`docs/agents/method.md`](docs/agents/method.md)** —
+  **Start here for any non-trivial change.** Describes our adapted **BMAD-Fluid**
+  process: a six-persona dream team, three-phase loop (plan → implement →
+  review), persona-picker matrix, and the **mandatory "fluid poem in every
+  commit body"** rule.
+- **[`docs/agents/personas/`](docs/agents/personas/)** — six in-character
+  reviewer files (Maya / Hiro / Anouk / Marcus / Priya / Erik). Load the
+  ones the change touches, hand them the diff, ask for a critique.
 - **[`docs/agents/architecture.md`](docs/agents/architecture.md)** —
   module wiring, simulation step order, FBO inventory, render pipeline.
   *Load when:* changing the solver, adding a new pass, or touching `main.js`'s loop.
@@ -111,6 +127,10 @@ git add -A
 git commit -m "Subject in present tense
 
 Body explaining what regression this prevents or behaviour it adds.
+
+~~~ on fluids ~~~
+A poem here, three to six lines, on flow / pressure / light through water.
+Free verse or any structured form. Imagery over abstraction.
 
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 bash tools/stamp-version.sh --amend

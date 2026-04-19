@@ -143,3 +143,40 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
    locations.
 4. Call from `step()` between the existing passes — read
    `architecture.md#3-simulation-step` for the canonical order.
+
+---
+
+## 9. The BMAD-Fluid persona review (mandatory for non-trivial change)
+
+Read [`method.md`](method.md) for the full description. Quick form:
+
+1. **Pre-flight** — invoke a rubber-duck loaded with each relevant persona
+   MD (`personas/*.md`) plus a one-paragraph description of the planned
+   change. Capture findings, decide which to adopt, note rejections.
+2. **Implement** — code, `node --check`, browser smoke-test.
+3. **Diff review** — invoke the same personas with the actual diff. Iterate.
+4. **Compose the commit** — use the template in §10 below (the poem is
+   mandatory).
+
+Picker matrix lives in [`method.md#6-quick-persona-picker`](method.md#6-quick-persona-picker).
+
+---
+
+## 10. Commit message template (with mandatory fluid poem)
+
+```
+<imperative subject — 50 chars or less>
+
+<wrap-at-72 body explaining what changed, why, and which persona pass(es)
+covered it. Reference gotchas you specifically checked.>
+
+~~~ on fluids ~~~
+A short verse about flow / pressure / dye / light through water.
+Three to six lines. Free verse or any structured form.
+Concrete imagery — no commits, no code, no AI metaphors.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+```
+
+The poem is checked at PR review time. A missing or off-topic poem blocks
+merge.
