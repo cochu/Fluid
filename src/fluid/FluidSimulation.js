@@ -84,7 +84,7 @@ export class FluidSimulation {
     }
 
     const doubles = ['velocity', 'dye', 'pressure'];
-    const singles = ['divergence', 'curl', 'velTmpFwd', 'velTmpBak',
+    const singles = ['divergence', 'curl',
                      'dyeTmpFwd', 'dyeTmpBak', 'viscB', 'bloomFBO', 'bloomTemp'];
     for (const k of doubles) { destroyDoubleFBO(gl, this[k]); this[k] = null; }
     for (const k of singles) { destroyFBO(gl, this[k]);       this[k] = null; }
@@ -139,11 +139,11 @@ export class FluidSimulation {
     this.divergence = createFBO(gl, simW, simH, fmt.r.internalFormat, fmt.r.format, fmt.r.type, gl.NEAREST);
     this.curl       = createFBO(gl, simW, simH, fmt.r.internalFormat, fmt.r.format, fmt.r.type, gl.NEAREST);
 
-    // MacCormack temporaries — must be separate from the velocity/dye
-    // ping-pong because the original field φ_n must remain intact across the
-    // forward, backward and combiner passes.
-    this.velTmpFwd  = createFBO(gl, simW, simH, fmt.rg.internalFormat, fmt.rg.format, fmt.rg.type, gl.LINEAR);
-    this.velTmpBak  = createFBO(gl, simW, simH, fmt.rg.internalFormat, fmt.rg.format, fmt.rg.type, gl.LINEAR);
+    // MacCormack temporaries for the dye field — must be separate from
+    // the dye ping-pong because the original field φ_n must remain
+    // intact across the forward, backward and combiner passes.
+    // (Velocity self-advection no longer uses MacCormack — see step()
+    // for the rationale — so no velocity tmp FBOs are needed.)
     this.dyeTmpFwd  = createFBO(gl, dyeW, dyeH, fmt.rgba.internalFormat, fmt.rgba.format, fmt.rgba.type, gl.LINEAR);
     this.dyeTmpBak  = createFBO(gl, dyeW, dyeH, fmt.rgba.internalFormat, fmt.rgba.format, fmt.rgba.type, gl.LINEAR);
 
