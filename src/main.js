@@ -76,6 +76,28 @@ gl.disable(gl.CULL_FACE);
 let fluid     = new FluidSimulation(gl, ext, CONFIG);
 let particles = new ParticleSystem(gl, ext, CONFIG);
 
+/**
+ * Tear down the current simulation pair and instantiate replacements.
+ * If construction throws (shader compile fail / OOM / context lost),
+ * we keep the engine paused with a console error rather than letting
+ * the render loop step a destroyed object next frame.
+ */
+function rebuildSubsystems(reason) {
+  try {
+    fluid.destroy?.();
+    particles.destroy?.();
+  } catch (e) {
+    console.warn('[Fluid] destroy() threw during rebuild:', e);
+  }
+  try {
+    fluid     = new FluidSimulation(gl, ext, CONFIG);
+    particles = new ParticleSystem(gl, ext, CONFIG);
+  } catch (e) {
+    console.error(`[Fluid] Rebuild failed (${reason}); pausing.`, e);
+    CONFIG.PAUSED = true;
+  }
+}
+
 /* ──────────────────────────────────────────────────────────────────────
    4.  Input handling
    ────────────────────────────────────────────────────────────────────── */
@@ -96,10 +118,7 @@ const ui = new UI(CONFIG, {
   onToggleBloom(on) {},
   onToggleColorful(on) {},
   onTogglePerfMode(perfMode) {
-    fluid.destroy?.();
-    particles.destroy?.();
-    fluid     = new FluidSimulation(gl, ext, CONFIG);
-    particles = new ParticleSystem(gl, ext, CONFIG);
+    rebuildSubsystems('perf-mode toggle');
   },
   onForceChange(v) {},
   onDissipationChange(v) {},
@@ -215,10 +234,7 @@ function animate(now) {
       if (avgFrameTime > threshold && CONFIG.SIM_RESOLUTION > 64) {
         CONFIG.SIM_RESOLUTION = Math.max(64, CONFIG.SIM_RESOLUTION >> 1);
         CONFIG.DYE_RESOLUTION = Math.max(128, CONFIG.DYE_RESOLUTION >> 1);
-        fluid.destroy?.();
-        particles.destroy?.();
-        fluid     = new FluidSimulation(gl, ext, CONFIG);
-        particles = new ParticleSystem(gl, ext, CONFIG);
+        rebuildSubsystems('adaptive downscale');
         console.log(`[Fluid] Auto-reduced resolution to ${CONFIG.SIM_RESOLUTION}`);
       }
     }

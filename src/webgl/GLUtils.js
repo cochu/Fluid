@@ -47,8 +47,18 @@ export function createProgram(gl, vertSrc, fragSrc) {
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     const info = gl.getProgramInfoLog(program);
     gl.deleteProgram(program);
+    gl.deleteShader(vert);
+    gl.deleteShader(frag);
     throw new Error(`Program link error:\n${info}`);
   }
+
+  // Detach + delete shader objects now that the program is linked.
+  // Prevents leaking shader handles across repeated rebuilds (perf-mode
+  // toggle and adaptive resolution drop both reconstruct the simulation).
+  gl.detachShader(program, vert);
+  gl.detachShader(program, frag);
+  gl.deleteShader(vert);
+  gl.deleteShader(frag);
 
   // Enumerate and cache all active uniform locations.
   const uniforms = {};

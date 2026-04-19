@@ -64,6 +64,14 @@ export class ParticleSystem {
       try { gl.deleteBuffer(this._indexBuf); } catch (_) {}
       this._indexBuf = null;
     }
+    if (this._quadVBO) {
+      try { gl.deleteBuffer(this._quadVBO); } catch (_) {}
+      this._quadVBO = null;
+    }
+    if (this._quadVAO) {
+      try { gl.deleteVertexArray(this._quadVAO); } catch (_) {}
+      this._quadVAO = null;
+    }
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -270,8 +278,8 @@ export class ParticleSystem {
     if (!this._quadVAO) {
       this._quadVAO = gl.createVertexArray();
       gl.bindVertexArray(this._quadVAO);
-      const vbo = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      this._quadVBO = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._quadVBO);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
       gl.enableVertexAttribArray(0);
       gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
