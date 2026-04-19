@@ -369,7 +369,12 @@ void main() {
  * Particle position update (fragment shader renders into position texture).
  *
  * Each texel encodes one particle: (x, y, lifetime, _).
- * Particles are advected by the fluid velocity and decay over time.
+ * Particles are advected by the fluid velocity and wrap at the boundaries.
+ *
+ * Particles do NOT auto-respawn when they "die": dead particles stay dormant
+ * until the user explicitly drops them via the dedicated drop tool
+ * (see PARTICLE_SPAWN_FRAG). This avoids the disorienting effect of
+ * particles randomly reappearing across the screen.
  */
 export const PARTICLE_UPDATE_FRAG = /* glsl */`#version 300 es
 precision highp float;
@@ -378,14 +383,7 @@ in vec2 vUv;
 uniform sampler2D uPositions;  // current particle positions
 uniform sampler2D uVelocity;   // fluid velocity field
 uniform float     uDt;
-uniform float     uLifetimeDec;  // dt / maxLifetime
-uniform float     uRandSeed;     // changes each frame
 out vec4 fragColor;
-
-// Cheap pseudo-random in [0,1]
-float rand(vec2 co) {
-    return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
-}
 
 void main() {
     vec4  p        = texture(uPositions, vUv);
@@ -393,18 +391,49 @@ void main() {
     float lifetime = p.z;
 
     if (lifetime <= 0.0) {
-        // Respawn at a random position
-        float rx = rand(vUv + uRandSeed);
-        float ry = rand(vUv + uRandSeed + 0.5);
-        fragColor = vec4(rx, ry, 1.0, 0.0);
+        // Dormant — leave untouched until the user drops a fresh particle here.
+        fragColor = p;
     } else {
-        // Advect by velocity field
+        // Advect by velocity field, wrapping at boundaries.
         vec2 vel = texture(uVelocity, pos).xy;
         pos += vel * uDt;
-        // Wrap at boundaries
         pos  = fract(pos + 1.0);
-        lifetime -= uLifetimeDec;
-        fragColor = vec4(pos, max(lifetime, 0.0), 0.0);
+        fragColor = vec4(pos, lifetime, 0.0);
+    }
+}
+`;
+
+/**
+ * Particle spawn / "drop" shader.
+ *
+ * For every particle, with probability `uSpawnProb` we relocate it to a
+ * jittered position around `uPoint` and re-arm its lifetime. Used to
+ * implement the drag-and-drop "pour particles" interaction.
+ */
+export const PARTICLE_SPAWN_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uPositions;
+uniform vec2  uPoint;       // drop centre in UV
+uniform float uRadius;      // jitter radius (UV units)
+uniform float uSpawnProb;   // [0,1] fraction relocated this pass
+uniform float uRandSeed;
+out vec4 fragColor;
+
+float rand(vec2 co) {
+    return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+void main() {
+    vec4 p = texture(uPositions, vUv);
+    if (rand(vUv + uRandSeed) < uSpawnProb) {
+        float a      = rand(vUv + uRandSeed + 1.7) * 6.2831853;
+        float radius = sqrt(rand(vUv + uRandSeed + 3.3)) * uRadius;
+        vec2  jitter = vec2(cos(a), sin(a)) * radius;
+        fragColor    = vec4(uPoint + jitter, 1.0, 0.0);
+    } else {
+        fragColor = p;
     }
 }
 `;
@@ -440,9 +469,17 @@ void main() {
     vLifetime      = lifetime;
     vVelocity      = texture(uVelocity, pos).xy;
 
-    // UV [0,1] → NDC [-1,1], flip Y
+    // UV [0,1] → NDC [-1,1]. The fluid display & splat both treat UV.y=1
+    // as the top of the screen, so particles must follow the same convention
+    // (no extra Y flip) to react consistently to the velocity field.
     vec2 clip   = pos * 2.0 - 1.0;
-    clip.y      = -clip.y;
+
+    if (lifetime <= 0.0) {
+        // Hide dormant particles off-screen instead of drawing them at (0,0).
+        gl_Position  = vec4(2.0, 2.0, 0.0, 1.0);
+        gl_PointSize = 0.0;
+        return;
+    }
 
     gl_Position = vec4(clip, 0.0, 1.0);
     // Scale point size with lifetime and velocity magnitude

@@ -14,6 +14,7 @@ import { createProgram, createDoubleFBO, createFBO } from '../webgl/GLUtils.js';
 import {
   SIMPLE_VERT,
   PARTICLE_UPDATE_FRAG,
+  PARTICLE_SPAWN_FRAG,
   PARTICLE_RENDER_VERT,
   PARTICLE_RENDER_FRAG,
 } from '../fluid/Shaders.js';
@@ -47,6 +48,7 @@ export class ParticleSystem {
   _compilePrograms() {
     const { gl } = this;
     this._updateProg = createProgram(gl, SIMPLE_VERT, PARTICLE_UPDATE_FRAG);
+    this._spawnProg  = createProgram(gl, SIMPLE_VERT, PARTICLE_SPAWN_FRAG);
     this._renderProg = createProgram(gl, PARTICLE_RENDER_VERT, PARTICLE_RENDER_FRAG);
   }
 
@@ -126,21 +128,49 @@ export class ParticleSystem {
    * @param {number} dt  Delta time in seconds
    */
   update(velocityFBO, dt) {
-    const { gl, config } = this;
-
-    // Increment random seed each frame for varied re-spawning
-    this._randSeed = (this._randSeed + 0.1337) % 1;
+    const { gl } = this;
 
     const { program, uniforms } = this._updateProg;
     gl.useProgram(program);
 
-    gl.uniform1i(uniforms.uPositions,   this._posFBO.read.attach(0));
-    gl.uniform1i(uniforms.uVelocity,    velocityFBO.attach(1));
-    gl.uniform1f(uniforms.uDt,          dt);
-    gl.uniform1f(uniforms.uLifetimeDec, dt / config.PARTICLE_LIFETIME);
-    gl.uniform1f(uniforms.uRandSeed,    this._randSeed);
+    gl.uniform1i(uniforms.uPositions, this._posFBO.read.attach(0));
+    gl.uniform1i(uniforms.uVelocity,  velocityFBO.attach(1));
+    gl.uniform1f(uniforms.uDt,        dt);
 
     // Render to position write buffer
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this._posFBO.write.fbo);
+    gl.viewport(0, 0, this._texW, this._texH);
+    this._drawQuad();
+
+    this._posFBO.swap();
+  }
+
+  /**
+   * Drop a batch of particles around UV (x, y).
+   *
+   * For each particle, with probability `prob` it is teleported to the drop
+   * point with a small jitter (radius `radius` in UV units) and re-armed.
+   * Designed to be called once per animation frame while the user drags the
+   * dedicated drop button across the canvas.
+   *
+   * @param {number} x   UV x [0,1]
+   * @param {number} y   UV y [0,1]
+   * @param {number} [prob]    Fraction of particles relocated this call
+   * @param {number} [radius]  Jitter radius in UV units
+   */
+  spawnAt(x, y, prob = this.config.PARTICLE_DROP_RATE, radius = this.config.PARTICLE_DROP_RADIUS) {
+    const { gl } = this;
+    const { program, uniforms } = this._spawnProg;
+    gl.useProgram(program);
+
+    this._randSeed = (this._randSeed + 0.1337) % 1;
+
+    gl.uniform1i(uniforms.uPositions, this._posFBO.read.attach(0));
+    gl.uniform2f(uniforms.uPoint,     x, y);
+    gl.uniform1f(uniforms.uRadius,    radius);
+    gl.uniform1f(uniforms.uSpawnProb, prob);
+    gl.uniform1f(uniforms.uRandSeed,  this._randSeed);
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, this._posFBO.write.fbo);
     gl.viewport(0, 0, this._texW, this._texH);
     this._drawQuad();

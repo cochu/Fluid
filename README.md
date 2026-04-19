@@ -136,6 +136,7 @@ The render pass uses `gl_VertexID` (WebGL2) to look up each particle's position 
 |---|---|
 | **↺** | Reset simulation |
 | **✦** | Toggle GPU particles |
+| **💧** | Drop particles — press and drag this button onto the canvas to pour particles at the pointer |
 | **✺** | Toggle bloom post-process |
 | **◐** | Toggle colorful auto-hue mode |
 | **Force** slider | Splat force magnitude |

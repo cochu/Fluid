@@ -16,6 +16,7 @@ export class UI {
    * @param {Function} callbacks.onForceChange      (value: number)
    * @param {Function} callbacks.onParticleCountChange (value: number)
    * @param {Function} callbacks.onDissipationChange  (value: number)
+   * @param {Function} [callbacks.onParticleDrop]     (uvX: number, uvY: number) — called per-frame while user drags the drop button over the canvas
    */
   constructor(config, callbacks) {
     this._config    = config;
@@ -83,12 +84,59 @@ export class UI {
     });
 
     this._bind('slider-dissipation', 'input', e => {
-      // Map slider 0-100 → dissipation 0.95-1.0
-      const v = 0.95 + (Number(e.target.value) / 100) * 0.05;
+      // Map slider 0–100 → dissipation 0.95–0.999.
+      // Higher = particles & dye persist longer.
+      const v = 0.95 + (Number(e.target.value) / 100) * 0.049;
       this._config.DENSITY_DISSIPATION  = v;
-      this._config.VELOCITY_DISSIPATION = v - 0.005;
+      this._config.VELOCITY_DISSIPATION = v;
       this._callbacks.onDissipationChange(v);
     });
+
+    this._bindSpawnButton();
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+     Drop-particles button (drag-and-drop onto the canvas)
+     ────────────────────────────────────────────────────────────────── */
+
+  _bindSpawnButton() {
+    const btn    = document.getElementById('btn-spawn');
+    const canvas = document.getElementById('canvas');
+    if (!btn || !canvas) return;
+
+    let activePointerId = null;
+
+    const start = (e) => {
+      e.preventDefault();
+      activePointerId = e.pointerId;
+      try { btn.setPointerCapture(e.pointerId); } catch (_) { /* older browsers */ }
+      btn.classList.add('active');
+    };
+
+    const move = (e) => {
+      if (e.pointerId !== activePointerId) return;
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const x =     (e.clientX - rect.left) / rect.width;
+      const y = 1 - (e.clientY - rect.top)  / rect.height;
+      if (x >= 0 && x <= 1 && y >= 0 && y <= 1) {
+        this._callbacks.onParticleDrop?.(x, y);
+      }
+    };
+
+    const end = (e) => {
+      if (e.pointerId !== activePointerId) return;
+      activePointerId = null;
+      try { btn.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
+      btn.classList.remove('active');
+    };
+
+    btn.addEventListener('pointerdown',   start, { passive: false });
+    btn.addEventListener('pointermove',   move,  { passive: false });
+    btn.addEventListener('pointerup',     end);
+    btn.addEventListener('pointercancel', end);
+    // Prevent the browser's native HTML5 drag from kicking in on the button.
+    btn.addEventListener('dragstart',     e => e.preventDefault());
   }
 
   /* ──────────────────────────────────────────────────────────────────

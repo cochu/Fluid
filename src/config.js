@@ -13,10 +13,10 @@ export const CONFIG = {
 
   /* ── Fluid dynamics ───────────────────────────────────────────────── */
   /** How quickly dye fades each step (1 = no fade, 0 = instant clear). */
-  DENSITY_DISSIPATION: 0.985,
+  DENSITY_DISSIPATION: 0.99,
 
   /** How quickly velocity decays (1 = no decay). */
-  VELOCITY_DISSIPATION: 0.98,
+  VELOCITY_DISSIPATION: 0.99,
 
   /** Pressure fade per iteration – reduces numerical ringing. */
   PRESSURE: 0.8,
@@ -32,7 +32,7 @@ export const CONFIG = {
   SPLAT_RADIUS: 0.28,
 
   /** Force magnitude applied on pointer drag. */
-  SPLAT_FORCE: 6000,
+  SPLAT_FORCE: 3000,
 
   /* ── Visuals ──────────────────────────────────────────────────────── */
   COLORFUL: true,
@@ -54,11 +54,24 @@ export const CONFIG = {
   /** Total number of GPU particles. */
   PARTICLE_COUNT: 5000,
 
-  /** Max particle lifetime in seconds. */
+  /**
+   * Max particle lifetime in seconds.
+   * Currently informational — particles do not auto-decay; they live until
+   * relocated by the "drop particles" tool. Kept for backward compatibility.
+   */
   PARTICLE_LIFETIME: 5.0,
 
   /** Render point size (px, before DPR scaling). */
   PARTICLE_SIZE: 1.5,
+
+  /**
+   * Fraction of particles relocated to the cursor on each "drop" frame
+   * (when dragging from the dedicated drop button onto the canvas).
+   */
+  PARTICLE_DROP_RATE: 0.06,
+
+  /** Spread (UV radius) of the particle drop around the cursor. */
+  PARTICLE_DROP_RADIUS: 0.025,
 
   /* ── Performance ──────────────────────────────────────────────────── */
   PAUSED: false,

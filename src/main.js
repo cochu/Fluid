@@ -102,7 +102,14 @@ const ui = new UI(CONFIG, {
   onDissipationChange(v) {
     // CONFIG already updated by UI
   },
+  onParticleDrop(x, y) {
+    // Coalesce multiple events per frame into a single GPU pass
+    pendingDrop = { x, y };
+  },
 });
+
+/** Most recent particle drop request from the UI; consumed in animate(). */
+let pendingDrop = null;
 
 /* ──────────────────────────────────────────────────────────────────────
    6.  Automatic random splats (seed the simulation on first load)
@@ -171,7 +178,13 @@ function animate(now) {
   // ── Particle update ───────────────────────────────────────────────
   if (CONFIG.PARTICLES) {
     gl.disable(gl.BLEND);
+    if (pendingDrop) {
+      particles.spawnAt(pendingDrop.x, pendingDrop.y);
+      pendingDrop = null;
+    }
     particles.update(fluid.velocityTexture, dt);
+  } else {
+    pendingDrop = null;
   }
 
   // ── Render ────────────────────────────────────────────────────────
