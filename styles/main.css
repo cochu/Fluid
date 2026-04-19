@@ -318,6 +318,27 @@ html, body {
 }
 
 /* ============================================================
+   Permanent-source markers (SVG overlay)
+   ============================================================ */
+#sources-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 8;            /* above canvas (auto), below ui-overlay (10) */
+  pointer-events: none;  /* the inner <g class="src"> re-enables it */
+  display: none;
+  overflow: visible;
+}
+#sources-overlay g.src {
+  pointer-events: auto;
+  cursor: pointer;
+}
+#sources-overlay g.src:hover circle:first-of-type {
+  fill: rgba(255, 255, 255, 0.32);
+}
+
+/* ============================================================
    Pause overlay
    ============================================================ */
 #paused-overlay {

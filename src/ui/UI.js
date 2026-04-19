@@ -321,7 +321,103 @@ export class UI {
     this._bindAudioButton();
     this._bindTiltButton();
     this._bindSpawnButton();
+    this._bindObstacleButtons();
+    this._bindSourceButton();
   }
+
+  /* ──────────────────────────────────────────────────────────────────
+     Obstacle paint mode + clear
+     ────────────────────────────────────────────────────────────────── */
+
+  _bindObstacleButtons() {
+    this._bind('btn-obstacles', 'click', () => {
+      const want = !this._config.OBSTACLE_MODE;
+      // Mutually exclusive with source-place mode.
+      if (want) this._config.SOURCE_MODE = false;
+      this._config.OBSTACLE_MODE = want;
+      this._toggle('btn-obstacles', want);
+      this._toggle('btn-source', this._config.SOURCE_MODE);
+      const btn = document.getElementById('btn-obstacles');
+      if (btn) this._flashTip(btn, want ? 'Drag to paint walls' : 'Obstacle mode off');
+    });
+    this._bind('btn-clear-obstacles', 'click', () => {
+      this._cb.onClearObstacles?.();
+      const btn = document.getElementById('btn-clear-obstacles');
+      if (btn) this._flashTip(btn, 'Obstacles cleared');
+    });
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+     Source-placement mode + SVG overlay
+     ────────────────────────────────────────────────────────────────── */
+
+  _bindSourceButton() {
+    this._bind('btn-source', 'click', () => {
+      const want = !this._config.SOURCE_MODE;
+      if (want) this._config.OBSTACLE_MODE = false;
+      this._config.SOURCE_MODE = want;
+      this._toggle('btn-source', want);
+      this._toggle('btn-obstacles', this._config.OBSTACLE_MODE);
+      const btn = document.getElementById('btn-source');
+      if (btn) this._flashTip(btn, want ? 'Drag on canvas to place a source' : 'Source mode off');
+      this._renderSources();
+    });
+    this._svgOverlay = document.getElementById('sources-overlay');
+    this._renderSources();
+    window.addEventListener('resize', () => this._renderSources());
+  }
+
+  /** Re-paint the SVG markers + arrows from CONFIG.SOURCES. */
+  refreshSources() { this._renderSources(); }
+
+  _renderSources() {
+    const svg = this._svgOverlay;
+    if (!svg) return;
+    const list = this._config.SOURCES || [];
+    const canvas = document.getElementById('canvas');
+    const w = canvas?.clientWidth  || window.innerWidth;
+    const h = canvas?.clientHeight || window.innerHeight;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.setAttribute('width',  w);
+    svg.setAttribute('height', h);
+    svg.style.display = list.length ? 'block' : 'none';
+
+    let html = '';
+    if (list.length) {
+      html += `<defs><marker id="src-arrow" viewBox="0 0 10 10" refX="9" refY="5" `
+           +  `markerWidth="6" markerHeight="6" orient="auto-start-reverse">`
+           +  `<path d="M0,0 L10,5 L0,10 Z" fill="rgba(255,255,255,0.85)"/></marker></defs>`;
+      for (let i = 0; i < list.length; i++) {
+        const s = list[i];
+        const px = s.x * w;
+        const py = (1 - s.y) * h;
+        const len = Math.hypot(s.dx, s.dy);
+        const k   = len > 0 ? Math.min(80, 60 + len * 30) : 0;
+        const ex  = px + (len ? (s.dx / len) * k : 0);
+        const ey  = py + (len ? -(s.dy / len) * k : 0);
+        html += `<g class="src" data-i="${i}">`
+             +  `<line x1="${px}" y1="${py}" x2="${ex}" y2="${ey}" `
+             +  `stroke="rgba(255,255,255,0.65)" stroke-width="2" marker-end="url(#src-arrow)"/>`
+             +  `<circle cx="${px}" cy="${py}" r="9" fill="rgba(255,255,255,0.18)" `
+             +  `stroke="rgba(255,255,255,0.85)" stroke-width="2"/>`
+             +  `<circle cx="${px}" cy="${py}" r="14" fill="transparent" class="src-hit"/>`
+             +  `</g>`;
+      }
+    }
+    svg.innerHTML = html;
+    // Click handler on the larger transparent hit circle removes the source.
+    svg.querySelectorAll('g.src').forEach((g) => {
+      g.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const i = +g.dataset.i;
+        if (Number.isFinite(i)) {
+          this._config.SOURCES.splice(i, 1);
+          this._renderSources();
+        }
+      });
+    });
+  }
+
 
   /* ──────────────────────────────────────────────────────────────────
      Tilt / accelerometer (asynchronous — needs motion permission on iOS)
@@ -515,5 +611,7 @@ export class UI {
     this._toggle('btn-hq-advect', this._config.HIGH_QUALITY_ADVECTION);
     this._toggle('btn-pause',     this._config.PAUSED);
     this._toggle('btn-tilt',      this._config.TILT_REACTIVE);
+    this._toggle('btn-obstacles', this._config.OBSTACLE_MODE);
+    this._toggle('btn-source',    this._config.SOURCE_MODE);
   }
 }

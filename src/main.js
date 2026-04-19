@@ -94,6 +94,11 @@ function rebuildSubsystems(reason) {
   try {
     fluid     = new FluidSimulation(gl, ext, CONFIG);
     particles = new ParticleSystem(gl, ext, CONFIG);
+    // Replay any painted obstacles onto the fresh FBO so adaptive
+    // resolution / perf-mode toggles don't silently delete walls.
+    if (typeof obstacleStrokes !== 'undefined') {
+      for (const s of obstacleStrokes) fluid.paintObstacle(s.x, s.y, s.r, +1);
+    }
   } catch (e) {
     console.error(`[Fluid] Rebuild failed (${reason}); pausing.`, e);
     CONFIG.PAUSED = true;
@@ -107,15 +112,79 @@ function rebuildSubsystems(reason) {
 const input = new InputHandler(canvas, handleSplat, CONFIG);
 
 function handleSplat(x, y, dx, dy, color) {
+  // Obstacle-paint mode: the move callback paints solid mass instead of
+  // injecting fluid. We rely on the InputHandler's per-move events for
+  // continuous painting along the drag path. We also persist each stroke
+  // so adaptive-resolution rebuilds can replay them onto the fresh FBO.
+  if (CONFIG.OBSTACLE_MODE) {
+    const r = CONFIG.OBSTACLE_PAINT_RADIUS;
+    fluid.paintObstacle(x, y, r, +1);
+    obstacleStrokes.push({ x, y, r });
+    if (obstacleStrokes.length > 4096) obstacleStrokes.splice(0, 512);
+    return;
+  }
   fluid.splat(x, y, dx, dy, color);
 }
+
+/** Replayed onto a freshly-built fluid sim so obstacles survive resize / perf-mode. */
+const obstacleStrokes = [];
+
+/* ──────────────────────────────────────────────────────────────────────
+   4b.  Source-placement mode (capture-phase, intercepts InputHandler)
+   ────────────────────────────────────────────────────────────────────── */
+
+let sourceDragStart = null;
+function pointerToUV(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x:     (e.clientX - rect.left) / rect.width,
+    y: 1 - (e.clientY - rect.top)  / rect.height,
+  };
+}
+canvas.addEventListener('pointerdown', (e) => {
+  if (!CONFIG.SOURCE_MODE) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  sourceDragStart = pointerToUV(e);
+}, true);
+canvas.addEventListener('pointerup', (e) => {
+  if (!CONFIG.SOURCE_MODE || !sourceDragStart) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  const end = pointerToUV(e);
+  const dx  = end.x - sourceDragStart.x;
+  const dy  = end.y - sourceDragStart.y;
+  const len = Math.hypot(dx, dy);
+  // Default direction (upward) when the user just taps. Drag → vector.
+  // Scale: a 0.2-UV drag yields a force comparable to a single splat.
+  let vx, vy;
+  if (len < 0.015) { vx = 0;          vy = 0.45; }
+  else             { vx = dx * 4.5;   vy = dy * 4.5; }
+  const color = pickSplatColor(CONFIG.COLOR_MODE || 'rainbow', performance.now() * 0.001);
+  CONFIG.SOURCES.push({
+    x: sourceDragStart.x, y: sourceDragStart.y,
+    dx: vx, dy: vy, color, rate: 1,
+  });
+  ui.refreshSources?.();
+  sourceDragStart = null;
+}, true);
+canvas.addEventListener('pointercancel', (e) => {
+  if (!CONFIG.SOURCE_MODE) return;
+  sourceDragStart = null;
+}, true);
 
 /* ──────────────────────────────────────────────────────────────────────
    5.  UI
    ────────────────────────────────────────────────────────────────────── */
 
 const ui = new UI(CONFIG, {
-  onReset() { fluid.reset(); },
+  onReset() {
+    fluid.reset();
+    fluid.clearObstacles();
+    obstacleStrokes.length = 0;
+    CONFIG.SOURCES.length  = 0;
+    ui?.refreshSources?.();
+  },
   onToggleParticles(on) {},
   onToggleBloom(on) {},
   onToggleColorful(on) {},
@@ -148,6 +217,10 @@ const ui = new UI(CONFIG, {
     return false;
   },
   onColorModeChange(_mode) { /* nothing to rebuild — splat callers re-read CONFIG */ },
+  onClearObstacles() {
+    fluid.clearObstacles();
+    obstacleStrokes.length = 0;
+  },
 });
 
 /** Most recent particle drop request from the UI; consumed in animate(). */
@@ -254,6 +327,37 @@ function animate(now) {
   // burst of splats from the canvas centre on detected bass beats.
   audio.tick(now);
   tilt.tick(now);
+
+  // ── Tilt body force ───────────────────────────────────────────────
+  // The tilt module exposes a UV/s² vector; apply it as a uniform force
+  // over the whole velocity grid. No-op (zero cost) when tilt is off,
+  // mid-calibration, or below the deadzone.
+  if (tilt.enabled && tilt.calibrated) {
+    fluid.applyBodyForce(tilt.bodyForceX, tilt.bodyForceY, dt);
+  }
+
+  // ── Permanent sources ─────────────────────────────────────────────
+  // Each source emits a steady stream of dye + velocity. Per-frame
+  // amplitude is scaled by dt so total injection per second is
+  // resolution-independent.
+  const sources = CONFIG.SOURCES;
+  if (sources && sources.length) {
+    // Modest steady stream: at 60 fps and rate=1 a default source adds
+    // ~0.06 dye/s and ~9 velocity-units/s — readable as a continuous
+    // jet without saturating the dissipation budget.
+    const colorScale = dt * 3.5;
+    const velScale   = dt * 15;
+    for (let i = 0; i < sources.length; i++) {
+      const s = sources[i];
+      const r = s.rate ?? 1;
+      const c = {
+        r: s.color.r * colorScale * r,
+        g: s.color.g * colorScale * r,
+        b: s.color.b * colorScale * r,
+      };
+      fluid.splat(s.x, s.y, s.dx * velScale * r, s.dy * velScale * r, c);
+    }
+  }
 
   // ── Fluid step ────────────────────────────────────────────────────
   fluid.step(dt);

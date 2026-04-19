@@ -501,6 +501,7 @@ in vec2 vUv;
 uniform sampler2D uTexture;
 uniform sampler2D uBloom;
 uniform sampler2D uVelocity;
+uniform sampler2D uObstacles;
 uniform float     uBloomIntensity;
 uniform bool      uUseBloom;
 uniform bool      uShading;
@@ -528,6 +529,18 @@ void main() {
     }
 
     c = toneMap(c * 1.2);
+
+    // Obstacles render as dark glass tinted with a faint cyan rim. Sampling
+    // is unconditional because the obstacle FBO is cleared to 0 — when no
+    // obstacles are painted the effect is a no-op (0.0 mask everywhere).
+    float obs = clamp(texture(uObstacles, vUv).r, 0.0, 1.0);
+    if (obs > 0.001) {
+        vec3 glass = vec3(0.04, 0.08, 0.12);
+        // Soft inner glow: the dye colour bleeds slightly across the surface
+        // so a moving fluid still hints at what's behind the obstacle.
+        c = mix(c, glass + 0.15 * c, smoothstep(0.05, 0.55, obs));
+    }
+
     fragColor = vec4(c, 1.0);
 }
 `;
@@ -800,5 +813,84 @@ void main() {
     if (alpha < 0.02) discard;
     // Premultiplied alpha — main.js uses (ONE, ONE_MINUS_SRC_ALPHA).
     fragColor = vec4(rgb * alpha, alpha);
+}
+`;
+
+/* ══════════════════════════════════════════════════════════════════════
+   BODY-FORCE / OBSTACLE SHADERS
+   ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Uniform body force – adds a constant (uForce * uDt) to every velocity
+ * texel. Used by the accelerometer-tilt input to drift the entire field
+ * in the tilt direction (rather than splatting at the centre, which
+ * looked like a drain). A truly uniform force is divergence-free, so
+ * the next pressure projection has no work to do for it.
+ *
+ * Skips solid cells (obstacle mask) so a tilted device cannot push fluid
+ * into a wall. Boundary BCs already handle the screen edges.
+ */
+export const BODY_FORCE_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uVelocity;
+uniform sampler2D uObstacles;
+uniform vec2  uForce;     // UV/s² (already scaled by gain)
+uniform float uDt;
+out vec4 fragColor;
+void main() {
+    vec2  v   = texture(uVelocity,  vUv).xy;
+    float obs = texture(uObstacles, vUv).r;
+    vec2  nv  = (obs > 0.5) ? vec2(0.0) : (v + uForce * uDt);
+    fragColor = vec4(nv, 0.0, 1.0);
+}
+`;
+
+/**
+ * Obstacle mask paint – additive Gaussian splat written into the
+ * obstacle ping-pong. uColor is set to (1,1,1) for paint and the FBO
+ * is single-channel R8, so only .r matters at the consumer end. Reuses
+ * the SPLAT_FRAG uniform layout but clamps to [0,1] (no overdrive).
+ */
+export const OBSTACLE_PAINT_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uTarget;
+uniform float uAspectRatio;
+uniform float uValue;     // +1 to paint, -1 to erase
+uniform vec2  uPoint;
+uniform float uRadius;
+out vec4 fragColor;
+void main() {
+    vec2 p = vUv - uPoint;
+    p.x   *= uAspectRatio;
+    float g = exp(-dot(p, p) / uRadius);
+    float prev = texture(uTarget, vUv).r;
+    float v    = clamp(prev + uValue * g, 0.0, 1.0);
+    fragColor  = vec4(v, 0.0, 0.0, 1.0);
+}
+`;
+
+/**
+ * Velocity zero-out inside obstacles. A second-class boundary condition
+ * (the proper way is to mask divergence + pressure too) but visually
+ * sufficient for static, sparse obstacles: fluid grazes solids without
+ * flowing through them. Run after gradient subtract; the projection
+ * will smooth the resulting micro-divergence on the next frame.
+ */
+export const OBSTACLE_CLEAR_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uVelocity;
+uniform sampler2D uObstacles;
+out vec4 fragColor;
+void main() {
+    float obs = texture(uObstacles, vUv).r;
+    vec2  v   = texture(uVelocity,  vUv).xy;
+    if (obs > 0.5) v = vec2(0.0);
+    fragColor = vec4(v, 0.0, 1.0);
 }
 `;

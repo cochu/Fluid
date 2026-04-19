@@ -41,6 +41,9 @@ import {
   DISPLAY_FRAG,
   BLOOM_PREFILTER_FRAG,
   BLOOM_BLUR_FRAG,
+  BODY_FORCE_FRAG,
+  OBSTACLE_PAINT_FRAG,
+  OBSTACLE_CLEAR_FRAG,
 } from './Shaders.js';
 
 export class FluidSimulation {
@@ -83,7 +86,7 @@ export class FluidSimulation {
       this._prog = null;
     }
 
-    const doubles = ['velocity', 'dye', 'pressure'];
+    const doubles = ['velocity', 'dye', 'pressure', 'obstacles'];
     const singles = ['divergence', 'curl',
                      'dyeTmpFwd', 'dyeTmpBak', 'viscB', 'bloomFBO', 'bloomTemp'];
     for (const k of doubles) { destroyDoubleFBO(gl, this[k]); this[k] = null; }
@@ -119,6 +122,9 @@ export class FluidSimulation {
       display:          createProgram(gl, SIMPLE_VERT, DISPLAY_FRAG),
       bloomPrefilter:   createProgram(gl, SIMPLE_VERT, BLOOM_PREFILTER_FRAG),
       bloomBlur:        createProgram(gl, SIMPLE_VERT, BLOOM_BLUR_FRAG),
+      bodyForce:        createProgram(gl, SIMPLE_VERT, BODY_FORCE_FRAG),
+      obstaclePaint:    createProgram(gl, SIMPLE_VERT, OBSTACLE_PAINT_FRAG),
+      obstacleClear:    createProgram(gl, SIMPLE_VERT, OBSTACLE_CLEAR_FRAG),
     };
   }
 
@@ -149,6 +155,11 @@ export class FluidSimulation {
 
     // Frozen RHS for the implicit viscosity Jacobi solve. Reused as scratch.
     this.viscB      = createFBO(gl, simW, simH, fmt.rg.internalFormat, fmt.rg.format, fmt.rg.type, gl.NEAREST);
+
+    // Obstacle mask. Single-channel R, NEAREST. Painted via OBSTACLE_PAINT_FRAG
+    // (additive Gaussian splats), consumed by OBSTACLE_CLEAR_FRAG and the
+    // display shader. Double-buffered so paint can read+write atomically.
+    this.obstacles  = createDoubleFBO(gl, simW, simH, fmt.r.internalFormat, fmt.r.format, fmt.r.type, gl.LINEAR);
 
     // Bloom FBOs (half the dye resolution)
     const bloomW = Math.max(1, Math.floor(dyeW / 2));
@@ -227,6 +238,12 @@ export class FluidSimulation {
     //     subtract slightly disturbs the boundary ring).
     this._enforceVelocityBoundary();
 
+    // 10b. Zero velocity inside obstacles. Approximate boundary condition —
+    //      on the next frame the projection re-smooths the resulting micro
+    //      divergence at the obstacle skin. Visually sufficient for static
+    //      sparse obstacles; see anouk-cfd.md for the proper way.
+    this._clearVelocityInObstacles();
+
     // 11. Advect dye (MacCormack if enabled). Carrier is the latest
     //     projected velocity, frozen across the three passes.
     if (config.HIGH_QUALITY_ADVECTION) {
@@ -270,6 +287,78 @@ export class FluidSimulation {
   }
 
   /**
+   * Apply a uniform body force to the entire velocity field for `dt`
+   * seconds. Used by the accelerometer/tilt input. A uniform force is
+   * divergence-free, so it can be applied at any point in the step
+   * without violating mass conservation. We call it from main.js right
+   * before `step()` so the force enters the advection cycle the same
+   * frame it's emitted.
+   *
+   * No-op when the magnitude is essentially zero — saves a draw call
+   * on every frame the device is held still.
+   *
+   * @param {number} fx  Force in UV/s² along screen X
+   * @param {number} fy  Force in UV/s² along screen Y (UV.y=1 is top)
+   * @param {number} dt  Δt in seconds
+   */
+  applyBodyForce(fx, fy, dt) {
+    if (Math.abs(fx) + Math.abs(fy) < 1e-5) return;
+    const { gl } = this;
+    const { program, uniforms } = this._prog.bodyForce;
+    gl.useProgram(program);
+    gl.uniform1i(uniforms.uVelocity,  this.velocity.read.attach(0));
+    gl.uniform1i(uniforms.uObstacles, this.obstacles.read.attach(1));
+    gl.uniform2f(uniforms.uForce, fx, fy);
+    gl.uniform1f(uniforms.uDt, dt);
+    this._blit(this.velocity.write.fbo, this.velocity.write.width, this.velocity.write.height);
+    this.velocity.swap();
+  }
+
+  /**
+   * Paint or erase obstacle mass at UV (x, y). Additive Gaussian splat
+   * into the obstacle ping-pong; clamped to [0,1] inside the shader.
+   *
+   * @param {number} x  UV x [0,1]
+   * @param {number} y  UV y [0,1]
+   * @param {number} radius  Gaussian radius (UV-fraction-of-shorter-side)
+   * @param {number} value   +1 to paint, -1 to erase
+   */
+  paintObstacle(x, y, radius = 0.04, value = 1) {
+    const { gl } = this;
+    const aspectRatio = gl.canvas.width / gl.canvas.height;
+    const { program, uniforms } = this._prog.obstaclePaint;
+    gl.useProgram(program);
+    gl.uniform1i(uniforms.uTarget, this.obstacles.read.attach(0));
+    gl.uniform1f(uniforms.uAspectRatio, aspectRatio);
+    gl.uniform1f(uniforms.uValue, value);
+    gl.uniform2f(uniforms.uPoint, x, y);
+    gl.uniform1f(uniforms.uRadius, radius);
+    this._blit(this.obstacles.write.fbo, this.obstacles.write.width, this.obstacles.write.height);
+    this.obstacles.swap();
+  }
+
+  /** Wipe every painted obstacle. */
+  clearObstacles() {
+    const { gl } = this;
+    for (const fbo of [this.obstacles.read.fbo, this.obstacles.write.fbo]) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+  }
+
+  /** Zero velocity inside obstacle cells. Cheap full-screen pass. */
+  _clearVelocityInObstacles() {
+    const { gl } = this;
+    const { program, uniforms } = this._prog.obstacleClear;
+    gl.useProgram(program);
+    gl.uniform1i(uniforms.uVelocity,  this.velocity.read.attach(0));
+    gl.uniform1i(uniforms.uObstacles, this.obstacles.read.attach(1));
+    this._blit(this.velocity.write.fbo, this.velocity.write.width, this.velocity.write.height);
+    this.velocity.swap();
+  }
+
+  /**
    * Render the dye texture (+ optional bloom) to the default framebuffer.
    *
    * @param {WebGLFramebuffer|null} targetFBO  null = canvas
@@ -290,6 +379,9 @@ export class FluidSimulation {
     gl.uniform1i(uniforms.uTexture,  this.dye.read.attach(0));
     gl.uniform1i(uniforms.uVelocity, this.velocity.read.attach(1));
     gl.uniform1i(uniforms.uShading,  config.SHADING ? 1 : 0);
+
+    // Obstacle mask is always bound (cleared FBO = no-op)
+    gl.uniform1i(uniforms.uObstacles, this.obstacles.read.attach(3));
 
     // Always bind something to unit 2 (required by GLSL even when the branch is not taken)
     const bloomTex = (config.BLOOM && bloomFBO) ? bloomFBO : this.dye.read;

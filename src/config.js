@@ -176,4 +176,39 @@ export const CONFIG = {
    * and the feature is mostly meaningful on mobile / tablet devices.
    */
   TILT_REACTIVE: false,
+
+  /**
+   * Calibration window (ms) at the start of a tilt session: the device's
+   * resting acceleration vector is averaged over this window and stored
+   * as the new "zero". Subsequent tilt is measured as a delta from this
+   * baseline, so the user can hold the phone in any orientation.
+   */
+  TILT_CALIBRATION_MS: 450,
+
+  /**
+   * Body-force gain applied to the tilt delta. Output is in UV/s² and is
+   * passed straight to fluid.applyBodyForce. 0.05 means a 1 m/s² delta
+   * moves the field at 0.05 UV/s², a gentle drift over a couple seconds.
+   */
+  TILT_BODY_FORCE_GAIN: 0.05,
+
+  /* ── Obstacles ───────────────────────────────────────────────────── */
+  /** Master enable for the obstacle-paint pointer mode. Toggled by 🧱. */
+  OBSTACLE_MODE: false,
+  /** Gaussian radius (UV-fraction-of-shorter-side) of the obstacle brush. */
+  OBSTACLE_PAINT_RADIUS: 0.0035,
+
+  /* ── Permanent fluid sources ─────────────────────────────────────── */
+  /**
+   * Persistent emitters. Each entry: { x, y, dx, dy, color, rate }.
+   *   x, y      UV position [0,1]
+   *   dx, dy    velocity injected per emission (UV/s, before SPLAT_FORCE)
+   *   color     {r,g,b}, already pre-multiplied by DYE_BRIGHTNESS
+   *   rate      0..1 amplitude scale (UI default 1)
+   *
+   * Mutated by the UI; consumed once per frame in main.js animate loop.
+   */
+  SOURCES: [],
+  /** Master enable for the source-placement pointer mode. Toggled by 💠. */
+  SOURCE_MODE: false,
 };

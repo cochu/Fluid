@@ -26,6 +26,9 @@
       <button id="btn-colorful" class="ui-btn active" data-tip="Palette: Random hue" aria-label="Hue palette">◐</button>
       <button id="btn-audio" class="ui-btn" data-tip="Microphone reactivity" aria-label="Audio reactivity">🎤</button>
       <button id="btn-tilt" class="ui-btn" data-tip="Tilt to stir (uses device motion)" aria-label="Tilt reactivity">🧭</button>
+      <button id="btn-obstacles" class="ui-btn" data-tip="Paint obstacles (drag on canvas)" aria-label="Paint obstacles">🧱</button>
+      <button id="btn-clear-obstacles" class="ui-btn" data-tip="Clear obstacles" aria-label="Clear obstacles">🧽</button>
+      <button id="btn-source" class="ui-btn" data-tip="Place permanent source (drag = direction, tap to remove)" aria-label="Place source">💠</button>
       <button id="btn-pause" class="ui-btn" data-tip="Pause (space)" aria-label="Pause">⏸</button>
       <button id="btn-snapshot" class="ui-btn" data-tip="Save snapshot (PNG)" aria-label="Save snapshot">📷</button>
 
@@ -58,6 +61,7 @@
     <p>WebGL2 is required but not supported by your browser. Please use a modern browser.</p>
   </div>
   <div id="snapshot-flash" aria-hidden="true"></div>
+  <svg id="sources-overlay" aria-hidden="true"></svg>
 
   <script type="module" src="src/main.js"></script>
 
