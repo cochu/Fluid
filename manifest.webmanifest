@@ -1,0 +1,20 @@
+{
+  "name": "Fluid",
+  "short_name": "Fluid",
+  "description": "Real-time interactive WebGL2 fluid simulation. Touch the screen to push and swirl the fluid.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["entertainment", "graphics", "games"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

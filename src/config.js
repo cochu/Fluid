@@ -106,4 +106,37 @@ export const CONFIG = {
 
   /** Dimming factor applied to splat colours so they blend well in the fluid. */
   DYE_BRIGHTNESS: 0.15,
+
+  /* ── Audio reactivity ─────────────────────────────────────────────── */
+  /**
+   * Master enable for microphone-driven splats. Toggled at runtime by the
+   * 🎤 UI button; the AudioReactivity module is a no-op when this is off.
+   */
+  AUDIO_REACTIVE: false,
+
+  /** Bass band lower bound (Hz) used to detect kicks / sub-bass. */
+  AUDIO_BASS_LOW_HZ: 20,
+  /** Bass band upper bound (Hz). 200 captures the body of a kick drum. */
+  AUDIO_BASS_HIGH_HZ: 200,
+
+  /**
+   * Beat trigger threshold expressed as a multiplier over the slow
+   * adaptive baseline. 1.4–2.0 works well in typical rooms.
+   */
+  AUDIO_SENSITIVITY: 1.55,
+
+  /** Absolute lower bound on smoothed bass energy (0..1). Below this we
+   *  consider the room silent and never trigger, regardless of ratio. */
+  AUDIO_NOISE_FLOOR: 0.06,
+
+  /** Minimum gap between consecutive rings (ms). Prevents smearing on
+   *  sustained bass and roughly caps trigger rate at 5 Hz. */
+  AUDIO_REFRACTORY_MS: 180,
+
+  /** Extra gain applied on top of SPLAT_FORCE for audio-triggered rings. */
+  AUDIO_GAIN: 0.85,
+
+  /** Number of radial splats emitted per detected beat (more = rounder
+   *  ring, but each splat is a fragment shader pass — keep it modest). */
+  AUDIO_SPLAT_COUNT: 16,
 };

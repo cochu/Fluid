@@ -15,6 +15,17 @@ import { FluidSimulation }  from './fluid/FluidSimulation.js';
 import { ParticleSystem }   from './particles/ParticleSystem.js';
 import { InputHandler }     from './input/InputHandler.js';
 import { UI }               from './ui/UI.js';
+import { AudioReactivity }  from './audio/AudioReactivity.js';
+
+// One-line WebGPU capability probe. The simulation still runs on WebGL2
+// (a full WebGPU port is a separate, much larger effort), but logging the
+// availability here gives us a hook for that future migration without
+// changing any user-visible behaviour.
+if ('gpu' in navigator) {
+  navigator.gpu.requestAdapter()
+    .then((adapter) => console.info('[Fluid] WebGPU adapter detected:', adapter && adapter.info ? adapter.info : '(present)'))
+    .catch(() => { /* ignore – purely informational */ });
+}
 
 /* ──────────────────────────────────────────────────────────────────────
    1.  Canvas setup
@@ -106,10 +117,30 @@ const ui = new UI(CONFIG, {
     // Coalesce multiple events per frame into a single GPU pass
     pendingDrop = { x, y };
   },
+  async onToggleAudio(want) {
+    if (want) {
+      try {
+        await audio.start();
+        return true;
+      } catch (err) {
+        // Surface the failure to the UI so it can show the denied state.
+        throw err;
+      }
+    } else {
+      audio.stop();
+      return false;
+    }
+  },
 });
 
 /** Most recent particle drop request from the UI; consumed in animate(). */
 let pendingDrop = null;
+
+/* ──────────────────────────────────────────────────────────────────────
+   5b. Audio reactivity (microphone-driven radial speaker waves)
+   ────────────────────────────────────────────────────────────────────── */
+
+const audio = new AudioReactivity(handleSplat, CONFIG);
 
 /* ──────────────────────────────────────────────────────────────────────
    6.  Automatic random splats (seed the simulation on first load)
@@ -171,6 +202,11 @@ function animate(now) {
       }
     }
   }
+
+  // ── Audio reactivity ──────────────────────────────────────────────
+  // Cheap no-op when the mic toggle is off; otherwise emits a radial
+  // burst of splats from the canvas centre on detected bass beats.
+  audio.tick(now);
 
   // ── Fluid step ────────────────────────────────────────────────────
   fluid.step(dt);

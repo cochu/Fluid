@@ -100,6 +100,13 @@ html, body {
   border-color: rgba(255, 200, 0, 0.4);
 }
 
+/* Audio button – red tint when permission was denied / unavailable */
+.ui-btn.audio-denied {
+  background: rgba(255, 80, 80, 0.20);
+  color: #ff9b9b;
+  border-color: rgba(255, 80, 80, 0.40);
+}
+
 /* Drag-source button (drop particles) */
 .ui-btn-drag {
   cursor: grab;
