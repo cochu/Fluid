@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fluid – PWA icon.
+  A radial gradient ring suggesting a pressure wave / droplet,
+  designed to read as both "any" and "maskable" (safe zone = central 80%).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Fluid">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="60%">
+      <stop offset="0%"   stop-color="#0a1733"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </radialGradient>
+    <radialGradient id="ring" cx="50%" cy="50%" r="50%">
+      <stop offset="55%"  stop-color="#5dd1ff" stop-opacity="0"/>
+      <stop offset="78%"  stop-color="#5dd1ff" stop-opacity="0.95"/>
+      <stop offset="92%"  stop-color="#9b6dff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#9b6dff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="core" cx="50%" cy="50%" r="22%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="60%"  stop-color="#7ad9ff" stop-opacity="0.40"/>
+      <stop offset="100%" stop-color="#7ad9ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- full-bleed background so the icon renders correctly when masked -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+
+  <!-- outer pressure wave -->
+  <circle cx="256" cy="256" r="232" fill="url(#ring)"/>
+
+  <!-- inner droplet / speaker core -->
+  <circle cx="256" cy="256" r="120" fill="url(#core)"/>
+</svg>

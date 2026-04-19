@@ -91,6 +91,8 @@ Fluid/
     │   └── ParticleSystem.js   GPU particle advection + rendering
     ├── input/
     │   └── InputHandler.js     Pointer Events → splat calls
+    ├── audio/
+    │   └── AudioReactivity.js  Mic → bass-band beat detector → radial splats
     └── ui/
         └── UI.js               DOM wiring for controls
 ```
@@ -130,7 +132,49 @@ The render pass uses `gl_VertexID` (WebGL2) to look up each particle's position 
 
 ---
 
-## Controls
+## Audio reactivity 🎤
+
+Click the **🎤** button in the control panel to grant microphone access and turn on
+audio reactivity. The simulation listens to the bass band (~20–200 Hz) and, on
+each detected beat, emits a radial burst of velocity + dye splats from the centre
+of the canvas — the existing pressure solver naturally turns that radially-symmetric
+source into a clean expanding ring, so a kick drum reads as a *speaker pulse*.
+
+- A **slow adaptive baseline** self-calibrates to ambient room noise so the detector
+  doesn't trigger on conversation but does trigger on bass.
+- A **refractory window** (~180 ms) prevents sustained bass from smearing into a
+  single splash — you get one distinct ring per beat.
+- All audio parameters are tunable from `CONFIG` (`AUDIO_SENSITIVITY`,
+  `AUDIO_BASS_LOW_HZ`, `AUDIO_BASS_HIGH_HZ`, `AUDIO_REFRACTORY_MS`,
+  `AUDIO_SPLAT_COUNT`, `AUDIO_GAIN`, `AUDIO_NOISE_FLOOR`).
+- The microphone stream is **never sent anywhere** — analysis happens locally in
+  the browser, the `MediaStreamSource` is intentionally not connected to
+  `AudioContext.destination` (so it can't loop back through the speakers).
+- If the user denies the prompt, the browser lacks Web Audio, or the page is
+  served over an insecure origin, the button turns red and the rest of the
+  simulation continues working untouched.
+
+---
+
+## Progressive Web App (offline support)
+
+Fluid ships as an installable PWA:
+
+- `manifest.webmanifest` declares the app name, theme, icon and `display=standalone`.
+- `sw.js` is a service worker that pre-caches the entire app shell on install
+  (HTML, CSS, every ES-module source, the manifest and the icon) and then serves
+  same-origin GET requests using a stale-while-revalidate strategy. Navigations
+  fall back to cached `index.html` when the network is offline.
+- The cache name is **versioned** (`fluid-v1`) — bumping it invalidates the old
+  shell on the next visit.
+- Registration is guarded so it's a no-op on `file://` and other insecure origins.
+
+After visiting the page once over HTTPS (or `localhost`), reload it with the
+network disabled — the simulation will start exactly the same way.
+
+---
+
+
 
 | Control | Action |
 |---|---|
@@ -139,6 +183,7 @@ The render pass uses `gl_VertexID` (WebGL2) to look up each particle's position 
 | **💧** | Drop particles — press and drag this button onto the canvas to pour particles at the pointer |
 | **✺** | Toggle bloom post-process |
 | **◐** | Toggle colorful auto-hue mode |
+| **🎤** | Toggle **audio reactivity** — bass beats from the microphone produce expanding speaker-like rings |
 | **Force** slider | Splat force magnitude |
 | **Particles** slider | Particle count (500 – 10 000) |
 | **Dissipation** slider | How quickly dye & velocity fade |
@@ -202,9 +247,9 @@ settings, or Jacobi iteration count.
 ## Roadmap
 
 - [ ] **Obstacles** — add static shapes that deflect the fluid  
-- [ ] **Audio-reactive** — drive splat force from microphone input  
+- [x] **Audio-reactive** — drive splat force from microphone input *(see "Audio reactivity" section)*  
 - [ ] **Dye save/export** — screenshot or gif export  
-- [ ] **WebGPU** migration for even better mobile throughput  
-- [ ] **PWA** manifest + offline support  
+- [ ] **WebGPU** migration for even better mobile throughput *(capability is now probed at startup; full port pending)*  
+- [x] **PWA** manifest + offline support *(see "Progressive Web App" section)*  
 - [ ] **Color presets** — pastel, monochrome, fire, aurora themes  
 - [ ] **Viscosity control** — diffusion iterations exposed in the UI  

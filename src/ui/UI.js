@@ -17,6 +17,7 @@ export class UI {
    * @param {Function} callbacks.onParticleCountChange (value: number)
    * @param {Function} callbacks.onDissipationChange  (value: number)
    * @param {Function} [callbacks.onParticleDrop]     (uvX: number, uvY: number) — called per-frame while user drags the drop button over the canvas
+   * @param {Function} [callbacks.onToggleAudio]     (on: boolean) => Promise<boolean>|boolean — resolves with the *actual* state after permission prompt
    */
   constructor(config, callbacks) {
     this._config    = config;
@@ -103,7 +104,43 @@ export class UI {
       this._toggle('btn-hq-advect', this._config.HIGH_QUALITY_ADVECTION);
     });
 
+    this._bindAudioButton();
+
     this._bindSpawnButton();
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+     Audio reactivity button (asynchronous — needs mic permission)
+     ────────────────────────────────────────────────────────────────── */
+
+  _bindAudioButton() {
+    const btn = document.getElementById('btn-audio');
+    if (!btn) return;
+
+    let busy = false;
+    btn.addEventListener('click', async () => {
+      if (busy) return;
+      busy = true;
+      btn.classList.remove('audio-denied');
+
+      const want = !this._config.AUDIO_REACTIVE;
+      try {
+        // Callback returns the resolved on/off state (false if permission denied).
+        const actual = await this._callbacks.onToggleAudio?.(want);
+        const on = actual === undefined ? want : !!actual;
+        this._config.AUDIO_REACTIVE = on;
+        this._toggle('btn-audio', on);
+      } catch (err) {
+        // Permission denied / no mic / insecure context.
+        this._config.AUDIO_REACTIVE = false;
+        this._toggle('btn-audio', false);
+        btn.classList.add('audio-denied');
+        btn.title = `Audio unavailable: ${err && err.message ? err.message : 'permission denied'}`;
+        console.warn('[Fluid] Audio reactivity unavailable:', err);
+      } finally {
+        busy = false;
+      }
+    });
   }
 
   /* ──────────────────────────────────────────────────────────────────
