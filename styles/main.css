@@ -100,6 +100,18 @@ html, body {
   border-color: rgba(255, 200, 0, 0.4);
 }
 
+/* Drag-source button (drop particles) */
+.ui-btn-drag {
+  cursor: grab;
+}
+.ui-btn-drag.active,
+.ui-btn-drag:active {
+  cursor: grabbing;
+  background: rgba(120, 200, 255, 0.3);
+  color: #cfeaff;
+  border-color: rgba(120, 200, 255, 0.45);
+}
+
 /* ============================================================
    Sliders
    ============================================================ */

@@ -18,12 +18,13 @@
     <div class="ui-panel" id="ui-panel">
       <button id="btn-reset" class="ui-btn" title="Reset simulation" aria-label="Reset">↺</button>
       <button id="btn-particles" class="ui-btn active" title="Toggle particles" aria-label="Particles">✦</button>
+      <button id="btn-spawn" class="ui-btn ui-btn-drag" title="Drop particles — drag onto canvas" aria-label="Drop particles" draggable="false">💧</button>
       <button id="btn-bloom" class="ui-btn active" title="Toggle bloom" aria-label="Bloom">✺</button>
       <button id="btn-colorful" class="ui-btn active" title="Toggle colorful" aria-label="Color">◐</button>
 
       <div class="ui-slider-group">
         <label for="slider-force">Force</label>
-        <input type="range" id="slider-force" min="1000" max="20000" value="6000" step="500" aria-label="Force">
+        <input type="range" id="slider-force" min="500" max="10000" value="3000" step="250" aria-label="Force">
       </div>
 
       <div class="ui-slider-group">
@@ -33,7 +34,7 @@
 
       <div class="ui-slider-group">
         <label for="slider-dissipation">Dissipation</label>
-        <input type="range" id="slider-dissipation" min="0" max="100" value="15" step="1" aria-label="Dissipation">
+        <input type="range" id="slider-dissipation" min="0" max="100" value="82" step="1" aria-label="Dissipation">
       </div>
 
       <button id="btn-perf" class="ui-btn" title="Performance mode" aria-label="Performance mode">⚡</button>

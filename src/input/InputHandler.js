@@ -56,7 +56,6 @@ export class InputHandler {
 
     this._pointers.set(e.pointerId, {
       uv,
-      prevUv: { ...uv },
       color,
       moved: false,
     });
@@ -69,13 +68,12 @@ export class InputHandler {
 
     const uv = this._toUV(e);
 
-    // Compute delta in UV space (small = slow, large = fast)
-    const dx = uv.x - state.prevUv.x;
-    const dy = uv.y - state.prevUv.y;
+    // Compute delta against the previous pointer position (not a stale one).
+    const dx = uv.x - state.uv.x;
+    const dy = uv.y - state.uv.y;
 
-    state.prevUv = { ...state.uv };
-    state.uv     = uv;
-    state.moved  = true;
+    state.uv    = uv;
+    state.moved = true;
 
     // Scale by configured force
     const force = this._config.SPLAT_FORCE;
