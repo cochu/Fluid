@@ -98,7 +98,7 @@ export class AudioReactivity {
 
       this._source   = this._ctx.createMediaStreamSource(this._stream);
       this._analyser = this._ctx.createAnalyser();
-      this._analyser.fftSize               = 1024;          // 512 bins
+      this._analyser.fftSize               = 1024;          // 1024 samples → 512 frequency bins
       this._analyser.smoothingTimeConstant = 0.6;           // light internal EMA
       this._analyser.minDecibels           = -90;
       this._analyser.maxDecibels           = -10;

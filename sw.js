@@ -86,7 +86,7 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith((async () => {
     const cache    = await caches.open(CACHE_VERSION);
-    const cached   = await cache.match(req, { ignoreSearch: false });
+    const cached   = await cache.match(req);
     const networkP = fetch(req).then((res) => {
       // Only cache successful, basic responses (skip opaque/range/etc).
       if (res && res.ok && res.type === 'basic') {
