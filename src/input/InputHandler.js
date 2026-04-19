@@ -58,6 +58,7 @@ export class InputHandler {
       uv,
       color,
       moved: false,
+      lastT: (typeof e.timeStamp === 'number' ? e.timeStamp : performance.now()),
     });
   }
 
@@ -72,11 +73,21 @@ export class InputHandler {
     const dx = uv.x - state.uv.x;
     const dy = uv.y - state.uv.y;
 
+    // Time-normalise the delta so the resulting velocity (in UV/s) does not
+    // depend on the pointer event rate (60 Hz mice vs 120/240 Hz touchscreens
+    // would otherwise produce dramatically different splat strengths).
+    const nowT = (typeof e.timeStamp === 'number' ? e.timeStamp : performance.now());
+    const eventDt = Math.max(1, nowT - (state.lastT || nowT)); // ms, clamped
+    // Reference rate: 60 Hz ≈ 16.67 ms. Scale so a 16.67 ms gap reproduces
+    // the legacy behaviour (delta * force) and faster events get a smaller
+    // proportional boost rather than being summed up.
+    const rateScale = 16.667 / eventDt;
     state.uv    = uv;
+    state.lastT = nowT;
     state.moved = true;
 
-    // Scale by configured force
-    const force = this._config.SPLAT_FORCE;
+    // Scale by configured force, modulated by the rate normaliser.
+    const force = this._config.SPLAT_FORCE * rateScale;
     this._onSplat(uv.x, uv.y, dx * force, dy * force, state.color);
   }
 

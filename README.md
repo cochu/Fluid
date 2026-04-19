@@ -161,6 +161,44 @@ The render pass uses `gl_VertexID` (WebGL2) to look up each particle's position 
 
 ---
 
+## Benchmarking
+
+A self-contained benchmark page lives at `bench/bench.html`. It runs four
+deterministic scenarios (high-quality vs. perf mode, ν=0 vs. ν=0.05) with a
+seeded splat sequence, then reports mean / p95 frame time and the divergence
+L2 residual after the pressure solve.
+
+```bash
+python3 -m http.server 8080
+# then open
+http://localhost:8080/bench/bench.html
+# Append ?auto=1 to start the full run automatically; the result is also
+# exposed on window.__BENCH_RESULT__ for headless drivers.
+```
+
+Use it to compare branches before/after tweaks to the solver, precision
+settings, or Jacobi iteration count.
+
+---
+
+## Recent fixes
+
+- **Vorticity confinement axes**: `VORTICITY_FRAG` was reading the gradient of
+  `|ω|` with x/y swapped, which broke rotational symmetry and biased the
+  reinjected force along diagonals — particularly visible at ν≈0 as a
+  fractal-like drift. Now fixed.
+- **High precision pressure pipeline**: `CURL`, `DIVERGENCE`, `PRESSURE` and
+  `GRADIENT_SUBTRACT` shaders now declare `highp` for floats and samplers.
+  On mobile GPUs `mediump` collapsed to fp16, and 25 Jacobi iterations on
+  fp16 imprinted a stable grid pattern when there was no diffusion to mask
+  it.
+- **Pointer-rate-independent splats**: the input handler now scales the
+  per-event force by `16.667ms / Δt`, so 120/240 Hz pointers no longer push
+  several times harder than 60 Hz mice. The `Force` slider keeps its
+  60 Hz semantics.
+
+---
+
 ## Roadmap
 
 - [ ] **Obstacles** — add static shapes that deflect the fluid  

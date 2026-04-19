@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Fluid – Benchmark</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #000; color: #ddd;
+                 font-family: ui-monospace, monospace; }
+    #wrap { display: flex; gap: 12px; padding: 12px; }
+    #canvas { width: 512px; height: 512px; background: #111;
+              image-rendering: pixelated; }
+    #out { white-space: pre; flex: 1; min-width: 320px;
+           background: #0b0b0b; padding: 12px; border-radius: 6px; }
+    h1 { font-size: 14px; margin: 0 0 8px 0; }
+    button { background: #222; color: #ddd; border: 1px solid #444;
+             padding: 6px 10px; border-radius: 4px; cursor: pointer;
+             margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <h1 style="padding:8px 12px 0;">Fluid benchmark</h1>
+  <div id="wrap">
+    <canvas id="canvas" width="512" height="512"></canvas>
+    <div id="out">
+      <div id="status">Click "Run" to start. Results also exposed on
+window.__BENCH_RESULT__ for headless drivers.</div>
+      <div style="margin-top:8px;">
+        <button id="btn-run">Run full benchmark</button>
+        <button id="btn-quick">Quick (3s)</button>
+      </div>
+      <pre id="log"></pre>
+    </div>
+  </div>
+
+  <script type="module">
+    import { CONFIG }            from '../src/config.js';
+    import { getWebGL2Context }  from '../src/webgl/GLUtils.js';
+    import { FluidSimulation }   from '../src/fluid/FluidSimulation.js';
+
+    /* ───────────────────────── Setup ───────────────────────── */
+
+    const canvas = document.getElementById('canvas');
+    const logEl  = document.getElementById('log');
+    const stat   = document.getElementById('status');
+    const log    = (...a) => { logEl.textContent += a.join(' ') + '\n'; };
+
+    const ctx = getWebGL2Context(canvas);
+    if (!ctx) { stat.textContent = 'WebGL2 unavailable'; throw new Error('no webgl2'); }
+    const { gl, ext } = ctx;
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.CULL_FACE);
+
+    /** Build a fresh simulation snapshot under a given config override. */
+    function makeSim(overrides) {
+      const cfg = { ...CONFIG, ...overrides };
+      const sim = new FluidSimulation(gl, ext, cfg);
+      return { sim, cfg };
+    }
+
+    /** Deterministic LCG so different runs are byte-identical. */
+    function rng(seed) {
+      let s = (seed >>> 0) || 1;
+      return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 0x1_0000_0000; };
+    }
+
+    /** Apply a deterministic stream of splats over the simulated time. */
+    function deterministicSplats(sim, rand, dt, frameIndex) {
+      // 2 splats every ~10 frames, evenly distributed pseudo-random.
+      if (frameIndex % 10 !== 0) return;
+      for (let k = 0; k < 2; k++) {
+        const x = rand(), y = rand();
+        const a = rand() * Math.PI * 2;
+        const f = 3000 * (0.5 + rand());
+        sim.splat(x, y, Math.cos(a) * f, Math.sin(a) * f, {
+          r: rand() * 0.2, g: rand() * 0.2, b: rand() * 0.2,
+        });
+      }
+    }
+
+    /**
+     * Read back the divergence FBO and compute a residual norm. This is the
+     * single most important quality signal for the pressure solver: low value
+     * ⇒ velocity field is nearly divergence-free ⇒ no spurious sources/sinks
+     * (which is what users perceive as "grid imprinting" at low viscosity).
+     */
+    function divergenceResidual(sim) {
+      const w = sim.divergence.width, h = sim.divergence.height;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, sim.divergence.fbo);
+      // RGBA16F readback path (HALF_FLOAT). We accept the cost — bench-only.
+      const buf = new Uint16Array(w * h * 4);
+      try {
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.HALF_FLOAT, buf);
+      } catch (_) {
+        return NaN;
+      }
+      // Decode HALF_FLOAT → fp32, accumulate L2 of channel 0 (divergence).
+      let sumSq = 0, n = 0;
+      for (let i = 0; i < w * h; i++) {
+        const v = halfToFloat(buf[i * 4]);
+        sumSq += v * v; n++;
+      }
+      return Math.sqrt(sumSq / n);
+    }
+
+    /** Decode a 16-bit IEEE half float to a 32-bit float. */
+    function halfToFloat(h) {
+      const s = (h & 0x8000) >> 15;
+      const e = (h & 0x7C00) >> 10;
+      const f =  h & 0x03FF;
+      if (e === 0)   return (s ? -1 : 1) * Math.pow(2, -14) * (f / 1024);
+      if (e === 0x1F) return f ? NaN : (s ? -Infinity : Infinity);
+      return (s ? -1 : 1) * Math.pow(2, e - 15) * (1 + f / 1024);
+    }
+
+    /** P95 from a sorted-copy of timings. */
+    function pct(arr, p) {
+      const a = arr.slice().sort((x, y) => x - y);
+      return a[Math.min(a.length - 1, Math.floor(a.length * p))];
+    }
+
+    /* ─────────────────────── Bench scenarios ─────────────────────── */
+
+    async function runScenario({ name, frames, overrides, measureResidual }) {
+      const { sim } = makeSim(overrides);
+      const rand    = rng(1234);
+      const dt      = 1 / 60;
+      const times   = new Array(frames);
+      let residual  = NaN;
+
+      // Warm-up: 30 frames ignored.
+      for (let i = 0; i < 30; i++) {
+        deterministicSplats(sim, rand, dt, i);
+        sim.step(dt);
+      }
+
+      for (let i = 0; i < frames; i++) {
+        deterministicSplats(sim, rand, dt, i);
+        const t0 = performance.now();
+        sim.step(dt);
+        gl.finish();              // ensure GPU work flushed before timing
+        times[i] = performance.now() - t0;
+      }
+
+      if (measureResidual) residual = divergenceResidual(sim);
+
+      const mean   = times.reduce((a, b) => a + b, 0) / times.length;
+      const p95    = pct(times, 0.95);
+      const fpsEq  = 1000 / mean;
+      return { name, frames, mean, p95, fpsEq, residual };
+    }
+
+    /* ─────────────────────── Driver ─────────────────────── */
+
+    async function runAll(quick = false) {
+      logEl.textContent = '';
+      stat.textContent = 'Running…';
+
+      const F = quick ? 60 : 240;
+      const scenarios = [
+        { name: 'baseline (HQ on, ν=0)',   frames: F, overrides: { HIGH_QUALITY_ADVECTION: true,  VISCOSITY: 0 },     measureResidual: true },
+        { name: 'plain SL  (HQ off, ν=0)', frames: F, overrides: { HIGH_QUALITY_ADVECTION: false, VISCOSITY: 0 },     measureResidual: true },
+        { name: 'viscous   (ν=0.05)',      frames: F, overrides: { HIGH_QUALITY_ADVECTION: true,  VISCOSITY: 0.05 },  measureResidual: true },
+        { name: 'perf mode (sim 64)',      frames: F, overrides: { SIM_RESOLUTION: 64, DYE_RESOLUTION: 256, PRESSURE_ITERATIONS: 10 }, measureResidual: false },
+      ];
+
+      const results = [];
+      for (const sc of scenarios) {
+        // eslint-disable-next-line no-await-in-loop
+        const r = await runScenario(sc);
+        results.push(r);
+        log(
+          r.name.padEnd(28),
+          'mean=' + r.mean.toFixed(2) + 'ms',
+          'p95='  + r.p95.toFixed(2)  + 'ms',
+          'fps='  + r.fpsEq.toFixed(1).padStart(5),
+          isFinite(r.residual) ? 'div_L2=' + r.residual.toExponential(2) : '',
+        );
+      }
+
+      window.__BENCH_RESULT__ = {
+        ts: new Date().toISOString(),
+        ua: navigator.userAgent,
+        results,
+      };
+      stat.textContent = 'Done. window.__BENCH_RESULT__ ready.';
+      log('\nJSON:');
+      log(JSON.stringify(window.__BENCH_RESULT__, null, 2));
+    }
+
+    document.getElementById('btn-run').addEventListener('click',  () => runAll(false));
+    document.getElementById('btn-quick').addEventListener('click', () => runAll(true));
+
+    // Headless auto-run: append ?auto=1 (or ?auto=quick) to launch immediately.
+    const params = new URLSearchParams(location.search);
+    if (params.has('auto')) runAll(params.get('auto') === 'quick');
+  </script>
+</body>
+</html>

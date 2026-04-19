@@ -328,9 +328,13 @@ void main() {
 `;
 
 /** Compute curl (z-component of ∇×v) for vorticity confinement. */
+// NOTE: precision *must* be highp here. mediump → fp16 on mobile, and the
+// curl values feed directly into the vorticity gradient (5-point stencil)
+// which then accumulates over many frames. fp16 truncation causes a visible
+// static grid pattern / checkerboard at low viscosity.
 export const CURL_FRAG = /* glsl */`#version 300 es
-precision mediump float;
-precision mediump sampler2D;
+precision highp float;
+precision highp sampler2D;
 in vec2 vUv;
 in vec2 vL; in vec2 vR; in vec2 vT; in vec2 vB;
 uniform sampler2D uVelocity;
@@ -346,8 +350,18 @@ void main() {
 `;
 
 /**
- * Vorticity confinement – injects angular momentum to restore small-scale
- * swirling that numerical diffusion would otherwise erase.
+ * Vorticity confinement (Fedkiw, Stam 2001) – injects angular momentum to
+ * restore small-scale swirling that numerical diffusion would otherwise erase.
+ *
+ *   η = ∇|ω|              (gradient of curl magnitude)
+ *   N = η / |η|           (normalised gradient)
+ *   f = ε · ω · (N.y, -N.x)   (perpendicular, signed by ω)
+ *
+ * BUG FIX: The previous implementation built the gradient with axes swapped
+ * (∂y component placed in x slot and vice-versa), which broke rotational
+ * symmetry and produced a strong diagonal bias — visible at low viscosity as
+ * a fractal-like / Julia-set-like striping. The corrected formula uses the
+ * standard central-difference layout (∂x → x, ∂y → y).
  */
 export const VORTICITY_FRAG = /* glsl */`#version 300 es
 precision highp float;
@@ -366,12 +380,12 @@ void main() {
     float B = texture(uCurl, vB).x;
     float C = texture(uCurl, vUv).x;
 
-    // Gradient of |curl|
-    vec2 force = 0.5 * vec2(abs(T) - abs(B), abs(R) - abs(L));
+    // Gradient of |curl| — central differences. ∂x in .x, ∂y in .y.
+    vec2 grad = 0.5 * vec2(abs(R) - abs(L), abs(T) - abs(B));
     // Normalise (avoid div-by-zero)
-    force /= length(force) + 1e-5;
-    // Perpendicular to curl gradient, scaled by curl magnitude
-    force  = vec2(force.y, -force.x) * uCurlStrength * C;
+    grad /= length(grad) + 1e-5;
+    // 2D perpendicular (rotated +90°), scaled by signed curl magnitude.
+    vec2 force = vec2(grad.y, -grad.x) * uCurlStrength * C;
 
     vec2 vel = texture(uVelocity, vUv).xy;
     fragColor = vec4(vel + force * uDt, 0.0, 1.0);
@@ -379,9 +393,11 @@ void main() {
 `;
 
 /** Compute velocity divergence ∇·v (central differences). */
+// highp required: divergence feeds the pressure Poisson solve which iterates
+// 20-30 times. Any fp16 quantisation here imprints as a stable grid pattern.
 export const DIVERGENCE_FRAG = /* glsl */`#version 300 es
-precision mediump float;
-precision mediump sampler2D;
+precision highp float;
+precision highp sampler2D;
 in vec2 vUv;
 in vec2 vL; in vec2 vR; in vec2 vT; in vec2 vB;
 uniform sampler2D uVelocity;
@@ -399,9 +415,12 @@ void main() {
  * Jacobi iteration for the pressure Poisson equation ∇²p = div(v).
  * Run 20-30 times each frame.
  */
+// highp required: 25 iterations of fp16 Jacobi accumulate quantisation noise
+// that surfaces as a visible grid imprint at low viscosity. The cost on a
+// 128² grid is negligible.
 export const PRESSURE_FRAG = /* glsl */`#version 300 es
-precision mediump float;
-precision mediump sampler2D;
+precision highp float;
+precision highp sampler2D;
 in vec2 vUv;
 in vec2 vL; in vec2 vR; in vec2 vT; in vec2 vB;
 uniform sampler2D uPressure;
@@ -423,8 +442,8 @@ void main() {
  *   v_new = v - ∇p
  */
 export const GRADIENT_SUBTRACT_FRAG = /* glsl */`#version 300 es
-precision mediump float;
-precision mediump sampler2D;
+precision highp float;
+precision highp sampler2D;
 in vec2 vUv;
 in vec2 vL; in vec2 vR; in vec2 vT; in vec2 vB;
 uniform sampler2D uPressure;
