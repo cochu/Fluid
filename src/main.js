@@ -206,7 +206,10 @@ function animate(now) {
   // ── Audio reactivity ──────────────────────────────────────────────
   // Cheap no-op when the mic toggle is off; otherwise emits a radial
   // burst of splats from the canvas centre on detected bass beats.
+  const beatsBefore = audio.beatCount;
   audio.tick(now);
+  const beatThisFrame = audio.beatCount !== beatsBefore;
+  ui.updateAudioMeter(audio.level, audio.threshold, beatThisFrame);
 
   // ── Fluid step ────────────────────────────────────────────────────
   fluid.step(dt);
