@@ -16,6 +16,8 @@ import { ParticleSystem }   from './particles/ParticleSystem.js';
 import { InputHandler }     from './input/InputHandler.js';
 import { UI }               from './ui/UI.js';
 import { AudioReactivity }  from './audio/AudioReactivity.js';
+import { AccelerometerInput } from './input/AccelerometerInput.js';
+import { pickSplatColor }   from './input/Palettes.js';
 import { BUILD_VERSION }    from './version.js';
 
 // Expose the build identifier early so the UI version tag (and any
@@ -137,6 +139,15 @@ const ui = new UI(CONFIG, {
     audio.stop();
     return false;
   },
+  async onToggleTilt(want) {
+    if (want) {
+      try { await tilt.start(); return true; }
+      catch (err) { throw err; }
+    }
+    tilt.stop();
+    return false;
+  },
+  onColorModeChange(_mode) { /* nothing to rebuild — splat callers re-read CONFIG */ },
 });
 
 /** Most recent particle drop request from the UI; consumed in animate(). */
@@ -179,6 +190,7 @@ function doSnapshot() {
    ────────────────────────────────────────────────────────────────────── */
 
 const audio = new AudioReactivity(handleSplat, CONFIG);
+const tilt  = new AccelerometerInput(handleSplat, CONFIG);
 
 /* ──────────────────────────────────────────────────────────────────────
    6.  Automatic random splats (seed the simulation on first load)
@@ -191,11 +203,8 @@ function randomSplat() {
   const force = CONFIG.SPLAT_FORCE * (0.5 + Math.random());
   const dx = Math.cos(angle) * force;
   const dy = Math.sin(angle) * force;
-  fluid.splat(x, y, dx, dy, {
-    r: Math.random() * CONFIG.DYE_BRIGHTNESS,
-    g: Math.random() * CONFIG.DYE_BRIGHTNESS,
-    b: Math.random() * CONFIG.DYE_BRIGHTNESS,
-  });
+  const color = pickSplatColor(CONFIG.COLOR_MODE || 'rainbow', performance.now() * 0.001);
+  fluid.splat(x, y, dx, dy, color);
 }
 
 // Seed with a few initial splats
@@ -244,6 +253,7 @@ function animate(now) {
   // Cheap no-op when the mic toggle is off; otherwise emits a radial
   // burst of splats from the canvas centre on detected bass beats.
   audio.tick(now);
+  tilt.tick(now);
 
   // ── Fluid step ────────────────────────────────────────────────────
   fluid.step(dt);

@@ -27,17 +27,19 @@ function logLerp(t, lo, hi) {
 
 /**
  * Force slider 0..100 → SPLAT_FORCE.
- *   - 0   → 60   (whisper-touch, particles barely react)
- *   - 20  → ~360
- *   - 50  → ~1620 (default, lively but controlled)
- *   - 100 → 5500 (firm, no longer firehose)
- * Power curve u^1.8 keeps fine control at the floor while still
- * reaching a confident maximum. Previous logLerp(200, 8000) felt
- * uncontrollably strong even at minimum.
+ *   - 0   → 5    (essentially no force — particles drift only)
+ *   - 10  → ~50
+ *   - 20  → ~185
+ *   - 50  → ~1129 (default; clearly lively but never feels like a firehose)
+ *   - 100 → 4500
+ * Quadratic curve `u²` collapses the floor much further than the previous
+ * `60 + 5440·u^1.8` mapping (which still felt punchy at slider 0–10) while
+ * keeping the upper half intuitive. Max lowered from 5500 → 4500 since the
+ * old top still felt borderline violent on small splats.
  */
 function forceFromSlider(t) {
   const u = Math.max(0, Math.min(1, t / 100));
-  return Math.round(60 + (5500 - 60) * Math.pow(u, 1.8));
+  return Math.round(5 + (4500 - 5) * u * u);
 }
 
 /**
@@ -68,6 +70,8 @@ function persistenceFromSlider(t) {
   const u = t / 100;
   return 0.92 + (0.999 - 0.92) * (u * u * (3 - 2 * u));   // smoothstep
 }
+
+import { COLOR_MODE_LABELS, nextMode } from '../input/Palettes.js';
 
 /* ──────────────────────────────────────────────────────────────────────
    UI class
@@ -222,7 +226,7 @@ export class UI {
   _initSliders() {
     const cfg = this._config;
 
-    // Force – log curve, range 200..8000.
+    // Force – quadratic curve, range 5..4500.
     this._bind('slider-force', 'input', (e) => {
       const v = forceFromSlider(Number(e.target.value));
       cfg.SPLAT_FORCE = v;
@@ -271,10 +275,20 @@ export class UI {
       this._cb.onToggleBloom?.(cfg.BLOOM);
     });
 
+    // Palette cycler — replaces the old binary "auto hue cycle" toggle.
+    // Each click advances COLOR_MODE through rainbow → cycle → ocean →
+    // sunset → magma → forest → mono → rainbow … and flashes the new
+    // palette name so the user sees what they picked.
     this._bind('btn-colorful', 'click', () => {
-      cfg.COLORFUL = !cfg.COLORFUL;
-      this._toggle('btn-colorful', cfg.COLORFUL);
-      this._cb.onToggleColorful?.(cfg.COLORFUL);
+      cfg.COLOR_MODE = nextMode(cfg.COLOR_MODE || 'rainbow');
+      cfg.COLORFUL   = cfg.COLOR_MODE !== 'mono';
+      this._toggle('btn-colorful', cfg.COLOR_MODE !== 'mono');
+      const btn = document.getElementById('btn-colorful');
+      if (btn) {
+        btn.dataset.tip = COLOR_MODE_LABELS[cfg.COLOR_MODE] || cfg.COLOR_MODE;
+        this._flashTip(btn, COLOR_MODE_LABELS[cfg.COLOR_MODE] || cfg.COLOR_MODE);
+      }
+      this._cb.onColorModeChange?.(cfg.COLOR_MODE);
     });
 
     this._bind('btn-perf', 'click', () => {
@@ -305,7 +319,38 @@ export class UI {
     this._bind('btn-snapshot', 'click', () => this._cb.onSnapshot?.());
 
     this._bindAudioButton();
+    this._bindTiltButton();
     this._bindSpawnButton();
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+     Tilt / accelerometer (asynchronous — needs motion permission on iOS)
+     ────────────────────────────────────────────────────────────────── */
+
+  _bindTiltButton() {
+    const btn = document.getElementById('btn-tilt');
+    if (!btn) return;
+    let busy = false;
+    btn.addEventListener('click', async () => {
+      if (busy) return;
+      busy = true;
+      btn.classList.remove('audio-denied');
+      const want = !this._config.TILT_REACTIVE;
+      try {
+        const actual = await this._cb.onToggleTilt?.(want);
+        const on     = actual === undefined ? want : !!actual;
+        this._config.TILT_REACTIVE = on;
+        this._toggle('btn-tilt', on);
+      } catch (err) {
+        this._config.TILT_REACTIVE = false;
+        this._toggle('btn-tilt', false);
+        btn.classList.add('audio-denied');
+        btn.dataset.tip = `Tilt unavailable: ${err?.message || 'permission denied'}`;
+        console.warn('[Fluid] Tilt reactivity unavailable:', err);
+      } finally {
+        busy = false;
+      }
+    });
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -463,8 +508,12 @@ export class UI {
   _syncStates() {
     this._toggle('btn-particles', this._config.PARTICLES);
     this._toggle('btn-bloom',     this._config.BLOOM);
-    this._toggle('btn-colorful',  this._config.COLORFUL);
+    const mode = this._config.COLOR_MODE || 'rainbow';
+    this._toggle('btn-colorful',  mode !== 'mono');
+    const cBtn = document.getElementById('btn-colorful');
+    if (cBtn) cBtn.dataset.tip = COLOR_MODE_LABELS[mode] || mode;
     this._toggle('btn-hq-advect', this._config.HIGH_QUALITY_ADVECTION);
     this._toggle('btn-pause',     this._config.PAUSED);
+    this._toggle('btn-tilt',      this._config.TILT_REACTIVE);
   }
 }

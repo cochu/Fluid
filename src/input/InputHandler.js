@@ -12,6 +12,7 @@
  */
 
 import { CONFIG } from '../config.js';
+import { pickSplatColor } from './Palettes.js';
 
 export class InputHandler {
   /**
@@ -52,7 +53,7 @@ export class InputHandler {
     this._canvas.setPointerCapture(e.pointerId);
 
     const uv    = this._toUV(e);
-    const color = this._randomColor();
+    const color = pickSplatColor(this._config.COLOR_MODE || 'rainbow', performance.now() * 0.001);
 
     this._pointers.set(e.pointerId, {
       uv,
@@ -108,38 +109,8 @@ export class InputHandler {
     };
   }
 
-  /** Generate a bright, saturated random colour for a new pointer. */
-  _randomColor() {
-    const h  = Math.random();
-    const s  = 0.9 + Math.random() * 0.1;
-    return hsvToRgb(h, s, 1.0);
-  }
-
   /** Return number of currently active pointers. */
   get activePointerCount() {
     return this._pointers.size;
   }
-}
-
-/* ──────────────────────────────────────────────────────────────────────
-   Colour helper (local copy to avoid circular imports)
-   ────────────────────────────────────────────────────────────────────── */
-
-function hsvToRgb(h, s, v) {
-  let r, g, b;
-  const i = Math.floor(h * 6);
-  const f = h * 6 - i;
-  const p = v * (1 - s);
-  const q = v * (1 - f * s);
-  const t = v * (1 - (1 - f) * s);
-  switch (i % 6) {
-    case 0: r = v; g = t; b = p; break;
-    case 1: r = q; g = v; b = p; break;
-    case 2: r = p; g = v; b = t; break;
-    case 3: r = p; g = q; b = v; break;
-    case 4: r = t; g = p; b = v; break;
-    case 5: r = v; g = p; b = q; break;
-  }
-  // Dimmed so they blend nicely in the fluid (CONFIG.DYE_BRIGHTNESS)
-  return { r: r * CONFIG.DYE_BRIGHTNESS, g: g * CONFIG.DYE_BRIGHTNESS, b: b * CONFIG.DYE_BRIGHTNESS };
 }

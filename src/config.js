@@ -56,9 +56,21 @@ export const CONFIG = {
   SPLAT_FORCE: 1500,
 
   /* ── Visuals ──────────────────────────────────────────────────────── */
+  /**
+   * Active hue palette for new splats. One of:
+   *   'rainbow' (legacy random hue per pointer), 'cycle' (slow rainbow),
+   *   'ocean', 'sunset', 'magma', 'forest', 'mono'.
+   * Cycled at runtime by the ◐ palette button.
+   */
+  COLOR_MODE: 'rainbow',
+
+  /**
+   * Legacy alias kept for backward compatibility with older snippets /
+   * external scripts. New code should test COLOR_MODE !== 'mono' instead.
+   */
   COLORFUL: true,
 
-  /** How fast hue rotates when COLORFUL is on (°/s). */
+  /** How fast hue rotates when COLOR_MODE === 'cycle' (°/s). */
   COLOR_UPDATE_SPEED: 10,
 
   /** Bloom post-process toggle. */
@@ -156,4 +168,12 @@ export const CONFIG = {
   /** Number of splats per bass ring (8 = clean approximation of radial
    *  symmetry; fewer aliases into × / diamond patterns). */
   AUDIO_SPLAT_COUNT: 8,
+
+  /* ── Tilt / accelerometer reactivity ─────────────────────────────── */
+  /**
+   * Master enable for accelerometer-driven stirring. OFF by default —
+   * permission must be requested from a user gesture (the 🧭 UI button)
+   * and the feature is mostly meaningful on mobile / tablet devices.
+   */
+  TILT_REACTIVE: false,
 };
