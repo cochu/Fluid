@@ -86,9 +86,9 @@ export class FluidSimulation {
   _createFBOs() {
     const { gl, config } = this;
     const fmt = this._formats;
-    const simW = this._calcRes(config.SIM_RESOLUTION);
+    const simW = this._clampRes(config.SIM_RESOLUTION);
     const simH = simW;
-    const dyeW = this._calcRes(config.DYE_RESOLUTION);
+    const dyeW = this._clampRes(config.DYE_RESOLUTION);
     const dyeH = dyeW;
 
     this.velocity   = createDoubleFBO(gl, simW, simH, fmt.rg.internalFormat, fmt.rg.format, fmt.rg.type, gl.LINEAR);
@@ -104,8 +104,8 @@ export class FluidSimulation {
     this.bloomTemp = createFBO(gl, bloomW, bloomH, fmt.rgba.internalFormat, fmt.rgba.format, fmt.rgba.type, gl.LINEAR);
   }
 
-  /** Return a resolution that is a power-of-two ≤ the requested value. */
-  _calcRes(res) {
+  /** Clamp a resolution to the GPU's maximum texture size. */
+  _clampRes(res) {
     const max = this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE);
     return Math.min(res, max);
   }
@@ -251,7 +251,7 @@ export class FluidSimulation {
     if (this.config.COLORFUL) {
       this._hue = (this._hue + this.config.COLOR_UPDATE_SPEED * deltaTime) % 360;
     }
-    return hsvToRgb(this._hue / 360, 1.0, 1.0);
+    return hsvToRgb(this._hue / 360, 1.0, 1.0, this.config.DYE_BRIGHTNESS);
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -401,9 +401,11 @@ export class FluidSimulation {
 
 /**
  * Convert HSV (hue [0,1], saturation [0,1], value [0,1]) to RGB object.
+ * `brightness` scales the output — use `CONFIG.DYE_BRIGHTNESS` to keep values
+ * consistent with the dye brightness setting everywhere.
  * @returns {{ r: number, g: number, b: number }}
  */
-function hsvToRgb(h, s, v) {
+function hsvToRgb(h, s, v, brightness = 1) {
   let r, g, b;
   const i = Math.floor(h * 6);
   const f = h * 6 - i;
@@ -418,5 +420,5 @@ function hsvToRgb(h, s, v) {
     case 4: r = t; g = p; b = v; break;
     case 5: r = v; g = p; b = q; break;
   }
-  return { r: r * 0.15, g: g * 0.15, b: b * 0.15 };
+  return { r: r * brightness, g: g * brightness, b: b * brightness };
 }

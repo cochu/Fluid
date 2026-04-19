@@ -65,7 +65,14 @@ export const CONFIG = {
 
   /**
    * Auto-reduce resolution when frame time exceeds this threshold (ms).
+   * 22 ms ≈ 45 FPS minimum — below this we start sacrificing quality for smoothness.
    * Set to 0 to disable adaptive quality.
    */
   ADAPTIVE_RESOLUTION_THRESHOLD_MS: 22,
+
+  /** How often (seconds) to re-evaluate whether adaptive resolution should trigger. */
+  ADAPTIVE_RESOLUTION_CHECK_INTERVAL: 2,
+
+  /** Dimming factor applied to splat colours so they blend well in the fluid. */
+  DYE_BRIGHTNESS: 0.15,
 };

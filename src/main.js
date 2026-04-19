@@ -115,7 +115,11 @@ function randomSplat() {
   const force = CONFIG.SPLAT_FORCE * (0.5 + Math.random());
   const dx = Math.cos(angle) * force;
   const dy = Math.sin(angle) * force;
-  fluid.splat(x, y, dx, dy, { r: Math.random() * 0.15, g: Math.random() * 0.15, b: Math.random() * 0.15 });
+  fluid.splat(x, y, dx, dy, {
+    r: Math.random() * CONFIG.DYE_BRIGHTNESS,
+    g: Math.random() * CONFIG.DYE_BRIGHTNESS,
+    b: Math.random() * CONFIG.DYE_BRIGHTNESS,
+  });
 }
 
 // Seed with a few initial splats
@@ -149,7 +153,7 @@ function animate(now) {
   const threshold = CONFIG.ADAPTIVE_RESOLUTION_THRESHOLD_MS;
   if (threshold > 0) {
     adaptiveTimer += dt;
-    if (adaptiveTimer > 2) {        // check every 2 s
+    if (adaptiveTimer > CONFIG.ADAPTIVE_RESOLUTION_CHECK_INTERVAL) {
       adaptiveTimer = 0;
       if (avgFrameTime > threshold && CONFIG.SIM_RESOLUTION > 64) {
         CONFIG.SIM_RESOLUTION = Math.max(64, CONFIG.SIM_RESOLUTION >> 1);

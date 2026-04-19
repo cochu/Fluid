@@ -57,11 +57,14 @@ export class ParticleSystem {
   _init(count) {
     const { gl } = this;
 
+    // Track the requested count so resize() can compare correctly
+    this._requestedCount = count;
+
     // Choose texture dimensions — square-ish, power of 2 not required
     const side = Math.ceil(Math.sqrt(count));
     this._texW  = side;
     this._texH  = side;
-    this._count = side * side;
+    this._count = side * side;  // actual particle capacity (≥ count)
 
     // Choose format — RGBA16F if available, else RGBA unsigned byte
     const internalFormat = this.ext.supportHalfFloat ? gl.RGBA16F : gl.RGBA;
@@ -173,10 +176,11 @@ export class ParticleSystem {
 
   /**
    * Resize (recreate) particle buffers when count changes.
+   * Compares against the originally requested count, not the rounded-up texture size.
    * @param {number} newCount
    */
   resize(newCount) {
-    if (newCount !== this._count) {
+    if (newCount !== this._requestedCount) {
       this._init(newCount);
     }
   }

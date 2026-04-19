@@ -11,6 +11,8 @@
  *   - colour    (assigned once per pointer-down)
  */
 
+import { CONFIG } from '../config.js';
+
 export class InputHandler {
   /**
    * @param {HTMLCanvasElement} canvas
@@ -129,6 +131,6 @@ function hsvToRgb(h, s, v) {
     case 4: r = t; g = p; b = v; break;
     case 5: r = v; g = p; b = q; break;
   }
-  // Dimmed so they blend nicely in the fluid
-  return { r: r * 0.15, g: g * 0.15, b: b * 0.15 };
+  // Dimmed so they blend nicely in the fluid (CONFIG.DYE_BRIGHTNESS)
+  return { r: r * CONFIG.DYE_BRIGHTNESS, g: g * CONFIG.DYE_BRIGHTNESS, b: b * CONFIG.DYE_BRIGHTNESS };
 }

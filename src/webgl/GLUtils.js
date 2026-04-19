@@ -105,7 +105,13 @@ export function createFBO(gl, w, h, internalFormat, format, type, filter) {
     texelSizeY: 1 / h,
     /**
      * Bind this texture to a texture unit and return the unit index.
+     *
+     * Side effect: calls `gl.activeTexture` and `gl.bindTexture` — this modifies
+     * global GL texture-unit state.  Always call this immediately before setting
+     * the corresponding sampler uniform so binding order is predictable.
+     *
      * @param {number} id  Texture unit index (0-based)
+     * @returns {number}   The same `id`, for convenient use in `gl.uniform1i` calls.
      */
     attach(id) {
       gl.activeTexture(gl.TEXTURE0 + id);
