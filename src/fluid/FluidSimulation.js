@@ -185,12 +185,13 @@ export class FluidSimulation {
       this._applyVorticity(dt);
     }
 
-    // 3. Self-advect velocity (MacCormack if enabled, else plain SL)
-    if (config.HIGH_QUALITY_ADVECTION) {
-      this._advectMacCormack(this.velocity, this.velocity, this.velTmpFwd, this.velTmpBak, config.VELOCITY_DISSIPATION, dt);
-    } else {
-      this._advect(this.velocity, this.velocity, config.VELOCITY_DISSIPATION, dt);
-    }
+    // 3. Self-advect velocity. Always plain semi-Lagrangian — MacCormack
+    //    on velocity preserves grid-scale modes, which combines with the
+    //    vorticity-confinement gradient to produce a stable checkerboard
+    //    "trame" once viscosity is at zero. The user-facing HQ-advect
+    //    toggle still applies to dye below, where the limiter works as
+    //    intended without an energy source feeding back into itself.
+    this._advect(this.velocity, this.velocity, config.VELOCITY_DISSIPATION, dt);
 
     // 4. Implicit viscous diffusion. Skipped when ν = 0 (zero cost) AND when
     //    the resulting α would be below a noise floor — running 20 Jacobi

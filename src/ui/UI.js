@@ -27,14 +27,17 @@ function logLerp(t, lo, hi) {
 
 /**
  * Force slider 0..100 → SPLAT_FORCE.
- *   - 0   → 200  (gentle prod, won't break the simulation)
- *   - 50  → 1500 (default, lively but controlled)
- *   - 100 → 8000 (firehose; previous default was 3000)
- * Geometric interpolation = each tick on the slider feels like a
- * comparable change in perceived strength.
+ *   - 0   → 60   (whisper-touch, particles barely react)
+ *   - 20  → ~360
+ *   - 50  → ~1620 (default, lively but controlled)
+ *   - 100 → 5500 (firm, no longer firehose)
+ * Power curve u^1.8 keeps fine control at the floor while still
+ * reaching a confident maximum. Previous logLerp(200, 8000) felt
+ * uncontrollably strong even at minimum.
  */
 function forceFromSlider(t) {
-  return Math.round(logLerp(t / 100, 200, 8000));
+  const u = Math.max(0, Math.min(1, t / 100));
+  return Math.round(60 + (5500 - 60) * Math.pow(u, 1.8));
 }
 
 /**

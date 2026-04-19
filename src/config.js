@@ -24,8 +24,11 @@ export const CONFIG = {
   /** Number of Jacobi pressure-solve iterations (more = more accurate). */
   PRESSURE_ITERATIONS: 25,
 
-  /** Vorticity / curl confinement strength – adds swirly detail. */
-  CURL: 25,
+  /** Vorticity / curl confinement strength – adds swirly detail.
+   *  Lowered from 25→16 in tandem with the gated VORTICITY_FRAG; the
+   *  gate suppresses noise amplification so we no longer need the
+   *  large strength that previously masked pre-existing trame. */
+  CURL: 16,
 
   /**
    * Use second-order MacCormack/Selle advection (3-pass, with limiter)
@@ -62,9 +65,13 @@ export const CONFIG = {
   BLOOM: true,
   BLOOM_ITERATIONS: 8,
   BLOOM_RESOLUTION: 256,
-  BLOOM_INTENSITY: 0.8,
-  BLOOM_THRESHOLD: 0.6,
-  BLOOM_SOFT_KNEE: 0.7,
+  /* Tuned against DYE_BRIGHTNESS=0.15 (typical accumulated dye lives
+   * in 0.2-0.5). Threshold 0.22 lets bright splat overlaps glow, the
+   * tight 0.12 knee keeps the glow defined instead of a vague wash,
+   * and 1.35 intensity makes the toggle visibly punchy. */
+  BLOOM_INTENSITY: 1.35,
+  BLOOM_THRESHOLD: 0.22,
+  BLOOM_SOFT_KNEE: 0.12,
 
   /* ── Particles ────────────────────────────────────────────────────── */
   PARTICLES: true,
@@ -80,7 +87,7 @@ export const CONFIG = {
   PARTICLE_LIFETIME: 5.0,
 
   /** Render point size (px, before DPR scaling). Larger = more aquatic blob. */
-  PARTICLE_SIZE: 3.0,
+  PARTICLE_SIZE: 4.5,
 
   /**
    * Fraction of particles relocated to the cursor on each "drop" frame

@@ -390,12 +390,27 @@ void main() {
     float B = texture(uCurl, vB).x;
     float C = texture(uCurl, vUv).x;
 
+    // 5-tap low-pass on the curl sample we confine against. Without this,
+    // pure-Nyquist checkerboard modes survive into the forcing term and
+    // get re-amplified frame after frame.
+    float omega = (L + R + T + B + 4.0 * C) * 0.125;
+
     // Gradient of |curl| — central differences. ∂x in .x, ∂y in .y.
-    vec2 grad = 0.5 * vec2(abs(R) - abs(L), abs(T) - abs(B));
-    // Normalise (avoid div-by-zero)
-    grad /= length(grad) + 1e-5;
-    // 2D perpendicular (rotated +90°), scaled by signed curl magnitude.
-    vec2 force = vec2(grad.y, -grad.x) * uCurlStrength * C;
+    vec2  eta    = 0.5 * vec2(abs(R) - abs(L), abs(T) - abs(B));
+    float etaLen = length(eta);
+
+    // Scale-aware gate: in regions where the local |curl| is essentially
+    // numerical noise, refuse to normalise the gradient into a unit
+    // vector and refuse to apply force. Without this gate, vorticity
+    // confinement turns Nyquist noise into a stable grid pattern as soon
+    // as viscosity stops damping it.
+    float local  = max(abs(omega), max(max(abs(L), abs(R)), max(abs(T), abs(B))));
+    float floorV = 0.15 * local + 1e-4;
+    vec2  N      = eta / max(etaLen, floorV);
+    float gate   = etaLen / (etaLen + floorV);
+
+    // 2D perpendicular (rotated +90°), gated, scaled by smoothed curl.
+    vec2 force = gate * uCurlStrength * omega * vec2(N.y, -N.x);
 
     vec2 vel = texture(uVelocity, vUv).xy;
     fragColor = vec4(vel + force * uDt, 0.0, 1.0);
@@ -724,21 +739,23 @@ void main() {
     }
 
     gl_Position = vec4(clip, 0.0, 1.0);
-    // Scale point size with lifetime and velocity magnitude — fast
-    // particles get visibly bigger so streaks read as droplets.
-    gl_PointSize = uPointSize * (0.7 + 0.3 * lifetime) * (1.0 + spd * 2.5);
+    // Keep sprites near constant size: fast particles only get a tiny
+    // boost, so motion reads through movement of the cloud rather than
+    // through visually noisy per-particle inflation.
+    gl_PointSize = uPointSize * (0.95 + 0.15 * clamp(spd * 0.25, 0.0, 1.0));
 }
 `;
 
 /**
  * Particle render – FRAGMENT shader.
  *
- * "Aquatic droplet" look:
- *   - velocity-direction stretch (teardrop)
- *   - speed → cyan/blue gradient (deep sea → foam)
- *   - faux caustic ring shimmer using uTime + per-particle seed
- *   - fresnel-style rim
- *   - speed-driven motion-blur softening (fast droplet = soft edge)
+ * Calm aquatic droplet:
+ *   - soft circular Gaussian body + tighter inner core
+ *   - deep ocean → cyan colour gradient driven by core falloff and speed
+ *   - a single offset specular highlight (light from above-left)
+ * No anisotropic stretch, no caustic ring, no fresnel — at small point
+ * sizes those layers read as shader noise rather than water. The fluid
+ * field already supplies all the motion language.
  */
 export const PARTICLE_RENDER_FRAG = /* glsl */`#version 300 es
 precision highp float;
@@ -749,54 +766,39 @@ in vec2  vVelDir;
 in float vSeed;
 
 uniform vec3  uColor;     // accent tint (multiplied into the gradient)
-uniform float uTime;      // seconds, drives the caustic shimmer
+uniform float uTime;      // seconds (kept for future use; currently unused)
 uniform float uTintMix;   // 0 = pure aqua palette, 1 = blend with uColor
 
 out vec4 fragColor;
 
 void main() {
-    vec2  d   = gl_PointCoord - 0.5;
+    vec2  d  = gl_PointCoord - 0.5;
+    float r2 = dot(d, d);
 
-    // Anisotropic distance: stretch along the local flow direction so fast
-    // particles read as elongated droplets / streaks.
-    float along   = dot(d,  vVelDir);
-    float across  = dot(d, vec2(-vVelDir.y, vVelDir.x));
-    float speed   = length(vVelocity);
-    float stretch = 1.0 + clamp(speed * 0.30, 0.0, 1.2);
-    // Forward-shift so the head is rounder than the tail.
-    float dist    = length(vec2(along / stretch - 0.04 * (stretch - 1.0), across));
+    // Soft circular body + tighter core — a small water bead.
+    float body = exp(-r2 * 18.0);
+    float core = exp(-r2 * 42.0);
 
-    // Speed-driven aqua gradient. Slow → deep ocean blue, fast → foamy cyan.
-    float t        = clamp(speed * 0.22, 0.0, 1.0);
-    vec3  slow     = vec3(0.04, 0.20, 0.55);
-    vec3  fast     = vec3(0.65, 0.95, 1.00);
-    vec3  aqua     = mix(slow, fast, t * t);
-    vec3  base     = mix(aqua, aqua * max(uColor, vec3(0.30)) * 1.4, uTintMix);
+    // Single faux specular: light from above-left, narrow falloff.
+    vec2  h    = d - vec2(-0.12, 0.14);
+    float spec = exp(-dot(h, h) * 110.0) * 0.45;
 
-    // Caustic ring — a thin bright annulus at a slowly-jittering radius
-    // mimics underwater refractive light specks. Radius brought inward
-    // (0.18) and falloff loosened (90) so the ring is still visible at
-    // small point sizes (~6–12 px sprite). vSeed decorrelates phase.
-    float causticR = 0.18 + 0.04 * sin(uTime * 5.8 + vSeed * 6.28);
-    float ring     = exp(-pow(dist - causticR, 2.0) * 90.0) * 0.55;
+    float speed = clamp(length(vVelocity) * 0.10, 0.0, 1.0);
 
-    // Fresnel-like rim — bright thin edge that suggests a refracting droplet.
-    float rim      = pow(smoothstep(0.30, 0.50, dist), 3.0) * 0.40;
-    vec3  rimCol   = vec3(0.78, 0.97, 1.00);
+    vec3  deep = vec3(0.02, 0.10, 0.26);
+    vec3  cyan = vec3(0.18, 0.78, 0.95);
+    vec3  base = mix(deep, cyan, 0.35 + 0.30 * core + 0.15 * speed);
 
-    // Speed-driven motion-blur softening: fast droplets read as streaked,
-    // slow droplets stay crisp. (We can't use lifetime here because the
-    // current particle update doesn't decay it.)
-    float softEdge = mix(0.46, 0.30, clamp(speed * 0.20, 0.0, 1.0));
-    float core     = (1.0 - smoothstep(0.10, softEdge, dist));
+    // Tint kept subtle so the aqua palette dominates.
+    base = mix(base, base * max(uColor, vec3(0.45)), uTintMix * 0.25);
 
-    // Compose
-    float alpha    = clamp(core + ring + rim, 0.0, 1.0);
-    vec3  rgb      = base * core + rimCol * (ring + rim);
+    vec3  rgb = base * (0.55 * body + 0.80 * core)
+              + vec3(0.75, 0.93, 1.00) * spec;
 
-    if (alpha < 0.01) discard;
-    // Premultiply alpha so we can use (ONE, ONE_MINUS_SRC_ALPHA) blending
-    // in main.js and not double-attenuate rgb.
+    float alpha = clamp(0.55 * body + 0.35 * core + spec, 0.0, 0.85);
+
+    if (alpha < 0.02) discard;
+    // Premultiplied alpha — main.js uses (ONE, ONE_MINUS_SRC_ALPHA).
     fragColor = vec4(rgb * alpha, alpha);
 }
 `;
