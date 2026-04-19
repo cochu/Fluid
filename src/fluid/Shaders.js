@@ -105,6 +105,10 @@ void main() {
  *
  * Works for both velocity self-advection (dyeTexelSize == velTexelSize)
  * and dye advection (different texel sizes).
+ *
+ * The trace-back coordinate is clamped to one half-texel inside the source
+ * texture so that CLAMP_TO_EDGE wrapping cannot re-inject the boundary into
+ * the interior (which would otherwise produce visible smudging at the edges).
  */
 export const ADVECTION_FRAG = /* glsl */`#version 300 es
 precision highp float;
@@ -134,7 +138,192 @@ void main() {
     // Trace back along velocity
     vec2 vel   = bilerp(uVelocity, vUv, uTexelSize).xy;
     vec2 coord = vUv - uDt * vel;
+    // Boundary fix #3: clamp to one half-texel inside the source so we do
+    // not re-sample the auto-clamped border (cf. CLAMP_TO_EDGE).
+    coord      = clamp(coord, 0.5 * uDyeTexelSize, 1.0 - 0.5 * uDyeTexelSize);
     fragColor  = uDissipation * bilerp(uSource, coord, uDyeTexelSize);
+}
+`;
+
+/**
+ * Reverse-time semi-Lagrangian advection — used for the backward pass of the
+ * MacCormack scheme. Same logic as ADVECTION_FRAG but with `+ uDt` and no
+ * dissipation (we want the raw error estimate). Implemented as a tiny variant
+ * to keep ADVECTION_FRAG itself unmodified for the standard path.
+ */
+export const ADVECTION_REVERSE_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uVelocity;
+uniform sampler2D uSource;
+uniform vec2  uTexelSize;
+uniform vec2  uDyeTexelSize;
+uniform float uDt;
+out vec4 fragColor;
+
+vec4 bilerp(sampler2D sam, vec2 uv, vec2 tsize) {
+    vec2 st  = uv / tsize - 0.5;
+    vec2 iuv = floor(st);
+    vec2 fuv = fract(st);
+    vec4 a = texture(sam, (iuv + vec2(0.5, 0.5)) * tsize);
+    vec4 b = texture(sam, (iuv + vec2(1.5, 0.5)) * tsize);
+    vec4 c = texture(sam, (iuv + vec2(0.5, 1.5)) * tsize);
+    vec4 d = texture(sam, (iuv + vec2(1.5, 1.5)) * tsize);
+    return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
+}
+
+void main() {
+    vec2 vel   = bilerp(uVelocity, vUv, uTexelSize).xy;
+    vec2 coord = vUv + uDt * vel;
+    coord      = clamp(coord, 0.5 * uDyeTexelSize, 1.0 - 0.5 * uDyeTexelSize);
+    fragColor  = bilerp(uSource, coord, uDyeTexelSize);
+}
+`;
+
+/**
+ * MacCormack/Selle combiner — second-order accurate advection.
+ *
+ * Inputs:
+ *   uPhi        : original field φ_n (frozen)
+ *   uPhiForward : φ_forward = advect(φ_n, +dt) (frozen)
+ *   uPhiBack    : φ_back    = advect(φ_forward, -dt)
+ *   uVelocity   : carrier velocity (frozen v_n for self-advection,
+ *                                   projected v for dye)
+ *
+ * Output: φ_forward + 0.5*(φ_n - φ_back), clamped to the local bilinear
+ * stencil min/max at the trace-back position (limiter — prevents the
+ * second-order correction from creating new extrema).
+ */
+export const MACCORMACK_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uPhi;
+uniform sampler2D uPhiForward;
+uniform sampler2D uPhiBack;
+uniform sampler2D uVelocity;
+uniform vec2  uTexelSize;     // velocity texel
+uniform vec2  uDyeTexelSize;  // source / phi texel
+uniform float uDt;
+uniform float uDissipation;
+out vec4 fragColor;
+
+vec4 bilerpVel(sampler2D sam, vec2 uv, vec2 tsize) {
+    vec2 st  = uv / tsize - 0.5;
+    vec2 iuv = floor(st);
+    vec2 fuv = fract(st);
+    vec4 a = texture(sam, (iuv + vec2(0.5, 0.5)) * tsize);
+    vec4 b = texture(sam, (iuv + vec2(1.5, 0.5)) * tsize);
+    vec4 c = texture(sam, (iuv + vec2(0.5, 1.5)) * tsize);
+    vec4 d = texture(sam, (iuv + vec2(1.5, 1.5)) * tsize);
+    return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
+}
+
+void main() {
+    vec4 phi_n   = texture(uPhi,        vUv);
+    vec4 phi_fwd = texture(uPhiForward, vUv);
+    vec4 phi_bak = texture(uPhiBack,    vUv);
+
+    // Second-order MacCormack correction
+    vec4 corrected = phi_fwd + 0.5 * (phi_n - phi_bak);
+
+    // Compute the four raw stencil texels at the trace-back position and use
+    // them as a limiter (Selle 2008): clamp the correction to [min, max] of
+    // the unfiltered neighbours. Reading raw texels (not the filtered
+    // texture()) is essential — the limiter must bound to actual cell values.
+    vec2 vel   = bilerpVel(uVelocity, vUv, uTexelSize).xy;
+    vec2 coord = vUv - uDt * vel;
+    coord      = clamp(coord, 0.5 * uDyeTexelSize, 1.0 - 0.5 * uDyeTexelSize);
+
+    vec2 st  = coord / uDyeTexelSize - 0.5;
+    vec2 iuv = floor(st);
+    vec4 a = texture(uPhi, (iuv + vec2(0.5, 0.5)) * uDyeTexelSize);
+    vec4 b = texture(uPhi, (iuv + vec2(1.5, 0.5)) * uDyeTexelSize);
+    vec4 c = texture(uPhi, (iuv + vec2(0.5, 1.5)) * uDyeTexelSize);
+    vec4 d = texture(uPhi, (iuv + vec2(1.5, 1.5)) * uDyeTexelSize);
+    vec4 mn = min(min(a, b), min(c, d));
+    vec4 mx = max(max(a, b), max(c, d));
+
+    fragColor = uDissipation * clamp(corrected, mn, mx);
+}
+`;
+
+/**
+ * Free-slip velocity boundary condition (Stam / Harris GPU Gems 1, ch. 38).
+ *
+ * On the 1-texel boundary ring: read the inner neighbour and write
+ * (-vn, vt) — normal component negated, tangential preserved. Interior
+ * fragments are passed through unchanged.
+ *
+ * Boundary detection uses integer texel coordinates from gl_FragCoord, which
+ * is exact (no float-precision ambiguity). texelFetch reads point-sampled
+ * values regardless of the texture's filter mode.
+ */
+export const BOUNDARY_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+uniform sampler2D uVelocity;
+uniform ivec2     uSize;   // (width, height) of the velocity grid
+out vec4 fragColor;
+
+void main() {
+    ivec2 p   = ivec2(gl_FragCoord.xy);
+    int   xMax = uSize.x - 1;
+    int   yMax = uSize.y - 1;
+
+    bool left   = p.x == 0;
+    bool right  = p.x == xMax;
+    bool bottom = p.y == 0;
+    bool top    = p.y == yMax;
+
+    if (!(left || right || bottom || top)) {
+        // Interior: pass-through.
+        fragColor = texelFetch(uVelocity, p, 0);
+        return;
+    }
+
+    // Read the inner neighbour (clamped to interior for corners).
+    ivec2 inner = ivec2(
+        clamp(p.x + (left ? 1 : (right  ? -1 : 0)), 0, xMax),
+        clamp(p.y + (bottom ? 1 : (top  ? -1 : 0)), 0, yMax)
+    );
+    vec4 v = texelFetch(uVelocity, inner, 0);
+    if (left || right) v.x = -v.x;
+    if (bottom || top) v.y = -v.y;
+    fragColor = v;
+}
+`;
+
+/**
+ * Implicit viscous diffusion — one Jacobi iteration.
+ *
+ * Solves (I - νΔt∇²) v_new = v_advected via
+ *     v_new[c] = (b[c] + α (vL+vR+vT+vB)) / (1 + 4α)
+ * with α = ν · Δt / h² (h is the grid cell size in UV units, i.e.
+ * h = 1/N → 1/h² = N²; we fold N² into α so the slider feel is
+ * resolution-independent).
+ *
+ * `uB` is the right-hand side (the advected velocity, must be immutable
+ * across iterations). `uX` is the current iterate (ping-pong source).
+ */
+export const VISCOSITY_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+in vec2 vL; in vec2 vR; in vec2 vT; in vec2 vB;
+uniform sampler2D uX;
+uniform sampler2D uB;
+uniform float uAlpha;   // ν · Δt · N² (dimensionless)
+out vec4 fragColor;
+
+void main() {
+    vec4 xL = texture(uX, vL);
+    vec4 xR = texture(uX, vR);
+    vec4 xT = texture(uX, vT);
+    vec4 xB = texture(uX, vB);
+    vec4 b  = texture(uB, vUv);
+    fragColor = (b + uAlpha * (xL + xR + xT + xB)) / (1.0 + 4.0 * uAlpha);
 }
 `;
 

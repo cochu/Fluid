@@ -27,6 +27,10 @@ import {
   CLEAR_FRAG,
   SPLAT_FRAG,
   ADVECTION_FRAG,
+  ADVECTION_REVERSE_FRAG,
+  MACCORMACK_FRAG,
+  BOUNDARY_FRAG,
+  VISCOSITY_FRAG,
   CURL_FRAG,
   VORTICITY_FRAG,
   DIVERGENCE_FRAG,
@@ -69,6 +73,10 @@ export class FluidSimulation {
       clear:            createProgram(gl, SIMPLE_VERT, CLEAR_FRAG),
       splat:            createProgram(gl, SIMPLE_VERT, SPLAT_FRAG),
       advection:        createProgram(gl, SIMPLE_VERT, ADVECTION_FRAG),
+      advectionRev:     createProgram(gl, SIMPLE_VERT, ADVECTION_REVERSE_FRAG),
+      maccormack:       createProgram(gl, SIMPLE_VERT, MACCORMACK_FRAG),
+      boundary:         createProgram(gl, SIMPLE_VERT, BOUNDARY_FRAG),
+      viscosity:        createProgram(gl, BASE_VERT,   VISCOSITY_FRAG),
       curl:             createProgram(gl, BASE_VERT,   CURL_FRAG),
       vorticity:        createProgram(gl, BASE_VERT,   VORTICITY_FRAG),
       divergence:       createProgram(gl, BASE_VERT,   DIVERGENCE_FRAG),
@@ -96,6 +104,17 @@ export class FluidSimulation {
     this.pressure   = createDoubleFBO(gl, simW, simH, fmt.r.internalFormat, fmt.r.format, fmt.r.type, gl.NEAREST);
     this.divergence = createFBO(gl, simW, simH, fmt.r.internalFormat, fmt.r.format, fmt.r.type, gl.NEAREST);
     this.curl       = createFBO(gl, simW, simH, fmt.r.internalFormat, fmt.r.format, fmt.r.type, gl.NEAREST);
+
+    // MacCormack temporaries — must be separate from the velocity/dye
+    // ping-pong because the original field φ_n must remain intact across the
+    // forward, backward and combiner passes.
+    this.velTmpFwd  = createFBO(gl, simW, simH, fmt.rg.internalFormat, fmt.rg.format, fmt.rg.type, gl.LINEAR);
+    this.velTmpBak  = createFBO(gl, simW, simH, fmt.rg.internalFormat, fmt.rg.format, fmt.rg.type, gl.LINEAR);
+    this.dyeTmpFwd  = createFBO(gl, dyeW, dyeH, fmt.rgba.internalFormat, fmt.rgba.format, fmt.rgba.type, gl.LINEAR);
+    this.dyeTmpBak  = createFBO(gl, dyeW, dyeH, fmt.rgba.internalFormat, fmt.rgba.format, fmt.rgba.type, gl.LINEAR);
+
+    // Frozen RHS for the implicit viscosity Jacobi solve. Reused as scratch.
+    this.viscB      = createFBO(gl, simW, simH, fmt.rg.internalFormat, fmt.rg.format, fmt.rg.type, gl.NEAREST);
 
     // Bloom FBOs (half the dye resolution)
     const bloomW = Math.max(1, Math.floor(dyeW / 2));
@@ -132,25 +151,51 @@ export class FluidSimulation {
       this._applyVorticity(dt);
     }
 
-    // 3. Self-advect velocity
-    this._advect(this.velocity, this.velocity, config.VELOCITY_DISSIPATION, dt);
+    // 3. Self-advect velocity (MacCormack if enabled, else plain SL)
+    if (config.HIGH_QUALITY_ADVECTION) {
+      this._advectMacCormack(this.velocity, this.velocity, this.velTmpFwd, this.velTmpBak, config.VELOCITY_DISSIPATION, dt);
+    } else {
+      this._advect(this.velocity, this.velocity, config.VELOCITY_DISSIPATION, dt);
+    }
 
-    // 4. Divergence
+    // 4. Implicit viscous diffusion (skipped when ν = 0, zero cost)
+    if (config.VISCOSITY > 0) {
+      this._applyViscosity(dt);
+    }
+
+    // 5. Enforce velocity boundary BEFORE divergence so the projection sees
+    //    a no-penetration field. Otherwise the BC patch would re-introduce
+    //    divergence in the cells next to the wall.
+    this._enforceVelocityBoundary();
+
+    // 6. Divergence
     this._computeDivergence();
 
-    // 5. Clear / fade pressure before solving
+    // 7. Clear / fade pressure before solving
     this._fadePressure(config.PRESSURE);
 
-    // 6. Pressure Jacobi solve
+    // 8. Pressure Jacobi solve. Pressure FBOs use CLAMP_TO_EDGE on the
+    //    sampler, which makes a boundary cell read itself as its outer
+    //    neighbour — i.e. ∂p/∂n = 0 (Neumann) is enforced implicitly on
+    //    every iteration. No explicit boundary pass needed for pressure.
     for (let i = 0; i < config.PRESSURE_ITERATIONS; i++) {
       this._pressureIteration();
     }
 
-    // 7. Gradient subtraction
+    // 9. Gradient subtraction
     this._subtractGradient();
 
-    // 8. Advect dye
-    this._advect(this.dye, this.velocity, config.DENSITY_DISSIPATION, dt);
+    // 10. Re-enforce velocity boundary post-projection (safety: gradient
+    //     subtract slightly disturbs the boundary ring).
+    this._enforceVelocityBoundary();
+
+    // 11. Advect dye (MacCormack if enabled). Carrier is the latest
+    //     projected velocity, frozen across the three passes.
+    if (config.HIGH_QUALITY_ADVECTION) {
+      this._advectMacCormack(this.dye, this.velocity, this.dyeTmpFwd, this.dyeTmpBak, config.DENSITY_DISSIPATION, dt);
+    } else {
+      this._advect(this.dye, this.velocity, config.DENSITY_DISSIPATION, dt);
+    }
   }
 
   /**
@@ -294,6 +339,118 @@ export class FluidSimulation {
     gl.uniform1f(uniforms.uDissipation, dissipation);
     this._blit(target.write.fbo, target.write.width, target.write.height);
     target.swap();
+  }
+
+  /**
+   * MacCormack/Selle advection — three passes:
+   *   φ_forward = advect(φ_n, +dt)
+   *   φ_back    = advect(φ_forward, -dt)
+   *   φ_new    = limiter( φ_forward + 0.5 * (φ_n - φ_back) ) * dissipation
+   *
+   * The carrier velocity (`velocityFBO.read`) is frozen across all three
+   * passes — for self-advection this is v_n; for dye it's the latest
+   * projected velocity.
+   *
+   * @param {DoubleFBO} target       Field being advected (read = φ_n; write swapped at end)
+   * @param {DoubleFBO} velocityFBO  Carrier (only `.read` is sampled)
+   * @param {FBO} tmpFwd             Scratch FBO at target's resolution / format
+   * @param {FBO} tmpBak             Scratch FBO at target's resolution / format
+   */
+  _advectMacCormack(target, velocityFBO, tmpFwd, tmpBak, dissipation, dt) {
+    const { gl } = this;
+    const velTex = velocityFBO.read;
+    const phiN   = target.read;
+
+    // ── Pass 1: forward advect φ_n into tmpFwd (no dissipation, raw value).
+    {
+      const { program, uniforms } = this._prog.advection;
+      gl.useProgram(program);
+      gl.uniform1i(uniforms.uVelocity,    velTex.attach(0));
+      gl.uniform1i(uniforms.uSource,      phiN.attach(1));
+      gl.uniform2f(uniforms.uTexelSize,    velTex.texelSizeX, velTex.texelSizeY);
+      gl.uniform2f(uniforms.uDyeTexelSize, phiN.texelSizeX,   phiN.texelSizeY);
+      gl.uniform1f(uniforms.uDt, dt);
+      gl.uniform1f(uniforms.uDissipation, 1.0);
+      this._blit(tmpFwd.fbo, tmpFwd.width, tmpFwd.height);
+    }
+
+    // ── Pass 2: reverse advect tmpFwd into tmpBak (carrier still v_n).
+    {
+      const { program, uniforms } = this._prog.advectionRev;
+      gl.useProgram(program);
+      gl.uniform1i(uniforms.uVelocity,    velTex.attach(0));
+      gl.uniform1i(uniforms.uSource,      tmpFwd.attach(1));
+      gl.uniform2f(uniforms.uTexelSize,    velTex.texelSizeX, velTex.texelSizeY);
+      gl.uniform2f(uniforms.uDyeTexelSize, tmpFwd.texelSizeX, tmpFwd.texelSizeY);
+      gl.uniform1f(uniforms.uDt, dt);
+      this._blit(tmpBak.fbo, tmpBak.width, tmpBak.height);
+    }
+
+    // ── Pass 3: combine + limiter, write to target.write, swap.
+    {
+      const { program, uniforms } = this._prog.maccormack;
+      gl.useProgram(program);
+      gl.uniform1i(uniforms.uPhi,         phiN.attach(0));
+      gl.uniform1i(uniforms.uPhiForward,  tmpFwd.attach(1));
+      gl.uniform1i(uniforms.uPhiBack,     tmpBak.attach(2));
+      gl.uniform1i(uniforms.uVelocity,    velTex.attach(3));
+      gl.uniform2f(uniforms.uTexelSize,    velTex.texelSizeX, velTex.texelSizeY);
+      gl.uniform2f(uniforms.uDyeTexelSize, phiN.texelSizeX,   phiN.texelSizeY);
+      gl.uniform1f(uniforms.uDt, dt);
+      gl.uniform1f(uniforms.uDissipation, dissipation);
+      this._blit(target.write.fbo, target.write.width, target.write.height);
+      target.swap();
+    }
+  }
+
+  /**
+   * Free-slip boundary on the velocity field. Single full-screen pass on the
+   * (small) velocity grid → negligible cost. Reads from velocity.read,
+   * writes to velocity.write, swaps.
+   */
+  _enforceVelocityBoundary() {
+    const { gl } = this;
+    const { program, uniforms } = this._prog.boundary;
+    gl.useProgram(program);
+    gl.uniform1i(uniforms.uVelocity, this.velocity.read.attach(0));
+    gl.uniform2i(uniforms.uSize, this.velocity.width, this.velocity.height);
+    this._blit(this.velocity.write.fbo, this.velocity.write.width, this.velocity.write.height);
+    this.velocity.swap();
+  }
+
+  /**
+   * Implicit viscous diffusion. Solves (I - νΔt∇²) v_new = v_advected via
+   * Jacobi iteration. The RHS `b` is copied into `viscB` once and stays
+   * frozen while the velocity ping-pong holds the iterate `x`.
+   *
+   * α is multiplied by N² so the user-facing VISCOSITY value is roughly
+   * resolution-independent (h = 1/N → 1/h² = N²).
+   */
+  _applyViscosity(dt) {
+    const { gl, config } = this;
+    const N      = this.velocity.width;
+    const alpha  = config.VISCOSITY * dt * (N * N);
+    if (alpha <= 0) return;
+
+    // 1. Snapshot the advected velocity into the immutable RHS texture.
+    {
+      const { program, uniforms } = this._prog.copy;
+      gl.useProgram(program);
+      gl.uniform1i(uniforms.uTexture, this.velocity.read.attach(0));
+      this._blit(this.viscB.fbo, this.viscB.width, this.viscB.height);
+    }
+
+    // 2. Jacobi iterations: x_{k+1} = (b + α (xL+xR+xT+xB)) / (1 + 4α)
+    const { program, uniforms } = this._prog.viscosity;
+    gl.useProgram(program);
+    gl.uniform2f(uniforms.uTexelSize, this.velocity.texelSizeX, this.velocity.texelSizeY);
+    gl.uniform1f(uniforms.uAlpha, alpha);
+    gl.uniform1i(uniforms.uB, this.viscB.attach(1));
+    for (let i = 0; i < config.VISCOSITY_ITERATIONS; i++) {
+      gl.uniform1i(uniforms.uX, this.velocity.read.attach(0));
+      this._blit(this.velocity.write.fbo, this.velocity.write.width, this.velocity.write.height);
+      this.velocity.swap();
+    }
   }
 
   _computeDivergence() {

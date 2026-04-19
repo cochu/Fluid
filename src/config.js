@@ -27,6 +27,24 @@ export const CONFIG = {
   /** Vorticity / curl confinement strength – adds swirly detail. */
   CURL: 25,
 
+  /**
+   * Use second-order MacCormack/Selle advection (3-pass, with limiter)
+   * instead of plain semi-Lagrangian. Significantly reduces numerical
+   * diffusion at the cost of two extra advection passes per advected field.
+   */
+  HIGH_QUALITY_ADVECTION: true,
+
+  /**
+   * Kinematic viscosity ν. 0 disables the implicit viscous diffusion pass
+   * entirely (no cost). Typical visible range is roughly 0–0.5; the value
+   * is multiplied by Δt · N² internally so the slider feel is independent
+   * of SIM_RESOLUTION.
+   */
+  VISCOSITY: 0,
+
+  /** Number of Jacobi iterations for the viscous diffusion solve. */
+  VISCOSITY_ITERATIONS: 20,
+
   /* ── Interaction ──────────────────────────────────────────────────── */
   /** Gaussian splat radius (fraction of shorter screen side). */
   SPLAT_RADIUS: 0.28,

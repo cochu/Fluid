@@ -92,6 +92,17 @@ export class UI {
       this._callbacks.onDissipationChange(v);
     });
 
+    this._bind('slider-viscosity', 'input', e => {
+      // Map slider 0–100 → viscosity 0–0.5 (quadratic for finer control near 0).
+      const t = Number(e.target.value) / 100;
+      this._config.VISCOSITY = 0.5 * t * t;
+    });
+
+    this._bind('btn-hq-advect', 'click', () => {
+      this._config.HIGH_QUALITY_ADVECTION = !this._config.HIGH_QUALITY_ADVECTION;
+      this._toggle('btn-hq-advect', this._config.HIGH_QUALITY_ADVECTION);
+    });
+
     this._bindSpawnButton();
   }
 
@@ -166,5 +177,6 @@ export class UI {
     this._toggle('btn-particles', this._config.PARTICLES);
     this._toggle('btn-bloom',     this._config.BLOOM);
     this._toggle('btn-colorful',  this._config.COLORFUL);
+    this._toggle('btn-hq-advect', this._config.HIGH_QUALITY_ADVECTION);
   }
 }
