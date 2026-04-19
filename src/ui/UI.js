@@ -116,6 +116,9 @@ export class UI {
   _bindAudioButton() {
     const btn = document.getElementById('btn-audio');
     if (!btn) return;
+    this._audioBtn    = btn;
+    this._lastVuLevel = 0;
+    this._beatTimer   = 0;
 
     let busy = false;
     btn.addEventListener('click', async () => {
@@ -194,6 +197,43 @@ export class UI {
   /** Update the FPS counter element. */
   updateFPS(fps) {
     if (this._fpsEl) this._fpsEl.textContent = `${fps | 0} FPS`;
+  }
+
+  /**
+   * Update the VU meter rendered behind the 🎤 button. Called every
+   * frame from the main loop; cheap when audio is off (early-exits).
+   *
+   * @param {number} level     Smoothed bass level in [0, 1].
+   * @param {number} threshold Adaptive trigger level in [0, 1].
+   * @param {boolean} beat     True on the frame a beat was just emitted.
+   */
+  updateAudioMeter(level, threshold, beat) {
+    const btn = this._audioBtn;
+    if (!btn) return;
+    if (!this._config.AUDIO_REACTIVE) {
+      // Reset visuals so a stale value doesn't linger after the user toggles off.
+      if (this._lastVuLevel !== 0) {
+        btn.style.setProperty('--vu-level', '0');
+        btn.style.setProperty('--vu-threshold', '0');
+        btn.classList.remove('beat');
+        this._lastVuLevel = 0;
+      }
+      return;
+    }
+    // Visual gain — bass rarely uses the upper half of [0,1], so map a
+    // reasonable usable range to the full ring. Capped so loud transients
+    // saturate visually without overflowing.
+    const vis = Math.min(1, Math.max(0, level     * 2.2));
+    const thr = Math.min(1, Math.max(0, threshold * 2.2));
+    btn.style.setProperty('--vu-level',     vis.toFixed(3));
+    btn.style.setProperty('--vu-threshold', thr.toFixed(3));
+    this._lastVuLevel = vis;
+
+    if (beat) {
+      btn.classList.add('beat');
+      clearTimeout(this._beatTimer);
+      this._beatTimer = setTimeout(() => btn.classList.remove('beat'), 140);
+    }
   }
 
   /* ──────────────────────────────────────────────────────────────────

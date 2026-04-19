@@ -107,6 +107,73 @@ html, body {
   border-color: rgba(255, 80, 80, 0.40);
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+   Audio VU meter (rendered behind the 🎤 icon)
+   ─────────────────────────────────────────────────────────────────────
+   Two CSS variables are written from JS each frame:
+     --vu-level     : 0..1 — current smoothed bass level
+     --vu-threshold : 0..1 — current adaptive trigger level
+   The meter is a conic-gradient ring drawn by ::before (so it stacks
+   under the icon glyph). A second ::after marks the threshold position
+   so the user can tell at a glance whether their music is loud enough.
+   The meter pulses red for ~150 ms when level > threshold, giving
+   visual confirmation of every detected beat (great for debugging). */
+#btn-audio {
+  position: relative;
+  --vu-level: 0;
+  --vu-threshold: 0;
+  --vu-color: rgba(120, 200, 255, 0.85);
+  isolation: isolate;        /* keep ::before/::after under the icon */
+  overflow: hidden;          /* clip the ring to the circular button */
+}
+#btn-audio::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  /* Ring fill, 0% → 100% mapped to (0..1) of --vu-level. */
+  background: conic-gradient(
+    from -90deg,
+    var(--vu-color) calc(var(--vu-level) * 360deg),
+    rgba(255, 255, 255, 0.04) 0
+  );
+  /* Hollow it out so the button background still shows through */
+  -webkit-mask: radial-gradient(circle, transparent 56%, #000 58%);
+          mask: radial-gradient(circle, transparent 56%, #000 58%);
+  pointer-events: none;
+  z-index: -1;
+  transition: opacity 0.2s;
+  opacity: var(--vu-active, 0);
+}
+#btn-audio.active::before { opacity: 1; }
+/* Threshold tick — a thin radial line at the trigger position. */
+#btn-audio::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from -90deg,
+    transparent calc(var(--vu-threshold) * 360deg - 1.2deg),
+    rgba(255, 255, 255, 0.85) 0 calc(var(--vu-threshold) * 360deg + 1.2deg),
+    transparent 0
+  );
+  -webkit-mask: radial-gradient(circle, transparent 50%, #000 52% 64%, transparent 66%);
+          mask: radial-gradient(circle, transparent 50%, #000 52% 64%, transparent 66%);
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+#btn-audio.active::after { opacity: 0.8; }
+/* Brief red flash on each detected beat (toggled from JS). */
+#btn-audio.beat {
+  background: rgba(255, 90, 110, 0.35);
+  color: #fff;
+  border-color: rgba(255, 90, 110, 0.6);
+}
+#btn-audio.beat::before { --vu-color: rgba(255, 140, 160, 1); }
+
 /* Drag-source button (drop particles) */
 .ui-btn-drag {
   cursor: grab;

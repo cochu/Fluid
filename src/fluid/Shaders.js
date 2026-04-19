@@ -382,10 +382,30 @@ void main() {
 
     // Gradient of |curl| — central differences. ∂x in .x, ∂y in .y.
     vec2 grad = 0.5 * vec2(abs(R) - abs(L), abs(T) - abs(B));
-    // Normalise (avoid div-by-zero)
-    grad /= length(grad) + 1e-5;
+
+    // Normalise — but with an epsilon scaled to the LOCAL curl magnitude.
+    //
+    // The classic   grad / (|grad| + 1e-5)   formulation is numerically
+    // brittle in near-uniform regions: as soon as |grad| approaches the
+    // tiny epsilon, the direction snaps to whatever rounding noise dominates
+    // (almost always grid-axis-aligned), so the confinement force keeps
+    // injecting axis-aligned momentum frame after frame and slowly stamps
+    // a checker / grid pattern across the visible dye — exactly what one
+    // sees at low velocity / high turbulence.
+    //
+    // Scaling ε by |C| means: in regions where vorticity itself is small
+    // (so a stable normal direction is undefined) the force fades to zero
+    // smoothly instead of locking onto noise. In regions with strong
+    // vorticity the term is unchanged, so the visible swirling behaviour
+    // is preserved.
+    float gradLen = length(grad);
+    float eps     = 0.05 * abs(C) + 1e-5;
+    vec2  N       = grad / (gradLen + eps);
+    // Soft fade: if |grad| ≪ ε the entire force vanishes (no random axis
+    // injection). This is the multiplicative companion to the eps-clamp.
+    float gate    = gradLen / (gradLen + eps);
     // 2D perpendicular (rotated +90°), scaled by signed curl magnitude.
-    vec2 force = vec2(grad.y, -grad.x) * uCurlStrength * C;
+    vec2  force   = vec2(N.y, -N.x) * uCurlStrength * C * gate;
 
     vec2 vel = texture(uVelocity, vUv).xy;
     fragColor = vec4(vel + force * uDt, 0.0, 1.0);

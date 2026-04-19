@@ -21,7 +21,7 @@
  * GitHub Pages project sites).
  */
 
-const CACHE_VERSION = 'fluid-v1';
+const CACHE_VERSION = 'fluid-v2';
 
 const APP_SHELL = [
   './',

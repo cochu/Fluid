@@ -47,16 +47,38 @@ export class AudioReactivity {
     this._source    = null;   // MediaStreamAudioSourceNode
     this._freqData  = null;   // Uint8Array – FFT magnitude buffer
 
-    /** Smoothed running baseline of the bass-band energy (0..1). */
-    this._baseline   = 0.05;
-    /** Smoothed instantaneous bass energy (0..1). */
+    /** Slow EMA of raw bass energy — our adaptive noise floor. */
+    this._baseline   = 0;
+    /** Slow EMA of (energy - baseline)² — running variance for adaptive σ. */
+    this._variance   = 1e-4;
+    /** Fast EMA of raw bass energy — used for the trigger test and VU meter. */
     this._smoothed   = 0;
+    /** Slow envelope follower (peak-decay) — used to render the VU meter. */
+    this._envelope   = 0;
+    /** Threshold value last evaluated, exposed via `threshold` for the UI. */
+    this._lastThreshold = 0;
+    /** Monotonic count of beats emitted (UI uses this to detect new beats). */
+    this._beatCount  = 0;
     /** Timestamp (ms) of the last beat we emitted. Used for refractory. */
     this._lastBeatMs = 0;
+    /** Timestamp (ms) at which capture started — used for a brief calibration window. */
+    this._startMs    = 0;
 
     /** Resolved when audio is fully running, rejected on failure. */
     this._readyP = null;
   }
+
+  /**
+   * Current smoothed bass level (0..1). Cheap and safe to call every frame
+   * even when audio is off — returns 0 in that case. Drives the VU meter.
+   */
+  get level()     { return this._smoothed; }
+  /** Slow envelope follower (0..1) — for a "peak hold" indicator. */
+  get envelope()  { return this._envelope; }
+  /** Current adaptive trigger level (0..1). For VU meter / debugging. */
+  get threshold() { return this._lastThreshold; }
+  /** Monotonically-increasing count of detected beats since start. */
+  get beatCount() { return this._beatCount; }
 
   /** Whether audio capture is currently active. */
   get isActive() {
@@ -107,6 +129,7 @@ export class AudioReactivity {
       // NOTE: we do NOT connect to ctx.destination – we never want feedback.
 
       this._freqData = new Uint8Array(this._analyser.frequencyBinCount);
+      this._startMs   = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     })();
 
     try {
@@ -139,10 +162,15 @@ export class AudioReactivity {
       try { this._ctx.close(); } catch (_) { /* noop */ }
       this._ctx = null;
     }
-    this._freqData   = null;
-    this._smoothed   = 0;
-    this._baseline   = 0.05;
-    this._lastBeatMs = 0;
+    this._freqData      = null;
+    this._smoothed      = 0;
+    this._envelope      = 0;
+    this._baseline      = 0;
+    this._variance      = 1e-4;
+    this._lastThreshold = 0;
+    this._lastBeatMs    = 0;
+    this._beatCount     = 0;
+    this._startMs       = 0;
   }
 
   /**
@@ -169,31 +197,81 @@ export class AudioReactivity {
     for (let i = lo; i <= hi; i++) sum += this._freqData[i];
     const energy = (sum / Math.max(1, hi - lo + 1)) / 255; // 0..1
 
-    // ── 2. Smooth instantaneous + slow adaptive baseline ───────────
+    // ── 2. Smoothed signal + slow envelope follower (for VU meter) ─
     //
-    // `_smoothed`  – fast EMA, follows transients (attack ≈ a few frames)
-    // `_baseline`  – slow EMA, follows ambient room noise so a shouted
-    //                conversation doesn't trigger but a kick-drum does.
+    // `_smoothed` is the trigger / display signal: a fast EMA so transients
+    // are visible. `_envelope` is a peak-decay follower used purely for the
+    // UI peak-hold indicator.
     this._smoothed = this._smoothed * 0.55 + energy * 0.45;
-    this._baseline = this._baseline * 0.985 + this._smoothed * 0.015;
+    this._envelope = Math.max(this._envelope * 0.92, this._smoothed);
 
-    // ── 3. Beat detection ──────────────────────────────────────────
-    const sens     = cfg.AUDIO_SENSITIVITY;          // multiplier over baseline
-    const floor    = cfg.AUDIO_NOISE_FLOOR;          // ignore total silence
-    const refract  = cfg.AUDIO_REFRACTORY_MS;        // min gap between rings
-    const isBeat   = this._smoothed > floor
-                   && this._smoothed > this._baseline * sens
-                   && (nowMs - this._lastBeatMs) > refract;
+    // ── 3. Adaptive baseline (μ) and variance (σ²) of RAW energy ──
+    //
+    // CRITICAL: we feed the slow estimators with the *raw* `energy` — not
+    // `_smoothed` — and we FREEZE them during the refractory window after a
+    // beat. The previous implementation fed the baseline with `_smoothed`,
+    // which contains the burst itself; after a few beats the baseline
+    // chased the bursts up to ~1.5× its starting value and the ratio test
+    // never fired again ("5 strong pulses then nothing"). Decoupling and
+    // freezing the estimator means the baseline tracks ambient room noise
+    // only, exactly like every published adaptive beat detector.
+    const sinceBeat   = nowMs - this._lastBeatMs;
+    const inRefract   = sinceBeat < cfg.AUDIO_REFRACTORY_MS;
+    const calibrating = (nowMs - this._startMs) < (cfg.AUDIO_CALIBRATION_MS || 0);
+
+    if (!inRefract) {
+      // Slow EMA over ~3 s @ 60 fps. Asymmetric: rises slower than it
+      // falls, so a sudden quiet section recalibrates quickly without the
+      // baseline being inflated by the next loud passage.
+      const rise = 0.005;
+      const fall = 0.05;
+      const k = energy > this._baseline ? rise : fall;
+      this._baseline = this._baseline + k * (energy - this._baseline);
+
+      // Welford-style variance EMA (same time constant as baseline rise).
+      const dev = energy - this._baseline;
+      this._variance = this._variance * (1 - rise) + dev * dev * rise;
+    }
+
+    // ── 4. Adaptive trigger level: μ + k·σ, clamped by ratio + floor ──
+    //
+    // `μ + k·σ` is the standard adaptive rule and behaves correctly
+    // whether the room is quiet (small σ → low threshold, sensitive) or
+    // noisy (large σ → high threshold, robust). We additionally enforce
+    // the historical ratio (`baseline * sens`) and absolute noise floor.
+    const sigma     = Math.sqrt(this._variance);
+    const sigmaK    = cfg.AUDIO_SIGMA_K !== undefined ? cfg.AUDIO_SIGMA_K : 2.5;
+    const ratio     = cfg.AUDIO_SENSITIVITY;
+    const floor     = cfg.AUDIO_NOISE_FLOOR;
+    const refract   = cfg.AUDIO_REFRACTORY_MS;
+    const threshold = Math.max(
+      floor,
+      this._baseline * ratio,
+      this._baseline + sigmaK * sigma
+    );
+    this._lastThreshold = threshold;
+
+    const isBeat   = !calibrating
+                   && this._smoothed > threshold
+                   && sinceBeat > refract;
 
     if (!isBeat) return;
     this._lastBeatMs = nowMs;
+    this._beatCount++;
 
-    // ── 4. Emit a radial burst from canvas center ──────────────────
+    // After a beat, drain the smoothed signal toward the baseline. Without
+    // this, a sustained loud note would keep `_smoothed` high above the
+    // threshold and we'd retrigger on every frame after the refractory
+    // window expires, smearing the visual into a continuous blob. Draining
+    // forces the next trigger to require a fresh transient.
+    this._smoothed = this._baseline;
+
+    // ── 5. Emit a radial burst from canvas center ──────────────────
     //
-    // Magnitude scales super-linearly with the headroom over baseline so
-    // a stronger kick produces a visibly larger ring. The user-facing
-    // SPLAT_FORCE slider still acts as a global gain.
-    const headroom = Math.min(3.0, this._smoothed / Math.max(0.01, this._baseline));
+    // Magnitude scales super-linearly with the headroom over the trigger
+    // level so a stronger kick produces a visibly larger ring. The
+    // user-facing SPLAT_FORCE slider still acts as a global gain.
+    const headroom = Math.min(3.0, energy / Math.max(0.01, threshold));
     const mag      = cfg.SPLAT_FORCE * cfg.AUDIO_GAIN * headroom;
 
     const n = cfg.AUDIO_SPLAT_COUNT | 0;
@@ -203,7 +281,7 @@ export class AudioReactivity {
 
     // Pick a single colour per ring so the wave reads as one event,
     // and cycle the hue from the audio energy itself.
-    const hue = (nowMs * 0.0002 + this._smoothed * 4) % 1;
+    const hue = (nowMs * 0.0002 + energy * 4) % 1;
     const color = hsvToRgb(hue, 0.9, cfg.DYE_BRIGHTNESS * (1 + headroom));
 
     for (let i = 0; i < n; i++) {
