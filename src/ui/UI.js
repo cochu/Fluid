@@ -75,7 +75,7 @@ function persistenceFromSlider(t) {
  * Obstacle brush slider 0..100 → OBSTACLE_PAINT_RADIUS (UV fraction of
  * the shorter screen side).
  *   - 0   → 0.0005 (sub-pixel pen — surgical edits)
- *   - 35  → ~0.005 (current visual default — fine line)
+ *   - 35  → ~0.0053 (current visual default — fine line)
  *   - 100 → 0.04   (broad swath, ~1/25 of canvas)
  * Quadratic so fine sizes near 0 are easy to dial in while still
  * reaching a fat brush at the top. Range tuned down (×0.1 at min,
