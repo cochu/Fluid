@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Fluid · test harness</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      font: 14px/1.45 system-ui, sans-serif;
+      background: #0a0c10;
+      color: #e6e8eb;
+      margin: 0;
+      padding: 24px;
+      max-width: 900px;
+    }
+    h1 { font-size: 18px; margin: 0 0 6px; }
+    p.hint { color: #8a8f96; margin: 0 0 18px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      text-align: left;
+      padding: 6px 10px;
+      border-bottom: 1px solid #1a1f26;
+      vertical-align: top;
+    }
+    th { color: #8a8f96; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    td.suite  { color: #8a8f96; width: 22%; }
+    td.name   { width: 48%; }
+    td.status { width: 10%; font-weight: 600; }
+    td.detail { color: #8a8f96; font-family: ui-monospace, monospace; font-size: 12px; }
+    .pass { color: #6ad07c; }
+    .fail { color: #f06262; }
+    .skip { color: #c0a25e; }
+    #summary { margin: 12px 0 24px; padding: 10px 14px; border-radius: 6px; background: #11161d; }
+    canvas { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Fluid · test harness</h1>
+  <p class="hint">
+    Open this page from a local HTTP server (e.g.
+    <code>python3 -m http.server 8080</code> then
+    <code>http://localhost:8080/tests/test.html</code>).
+    No build step, no dependencies. Each row is a structural or
+    visual smoke check; a regression in the golden-rule areas will
+    surface here as a red row.
+  </p>
+  <div id="summary">Running…</div>
+  <table>
+    <thead><tr><th>Suite</th><th>Test</th><th>Status</th><th>Detail</th></tr></thead>
+    <tbody id="results"></tbody>
+  </table>
+
+  <!-- Offscreen canvases used by the simulation smoke tests. The
+       sim binds to a real WebGL2 context, so we need a real DOM
+       canvas — but we hide it because pixels are read back via
+       gl.readPixels rather than displayed. -->
+  <canvas id="sim-canvas" width="320" height="240"></canvas>
+
+  <script type="module" src="./test.js"></script>
+</body>
+</html>
