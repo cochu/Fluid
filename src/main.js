@@ -116,8 +116,8 @@ function rebuildSubsystems(reason) {
     particles = new ParticleSystem(gl, ext, CONFIG);
     // Replay any painted obstacles onto the fresh FBO so adaptive
     // resolution / perf-mode toggles don't silently delete walls.
-    if (typeof obstacleStrokes !== 'undefined') {
-      for (const s of obstacleStrokes) fluid.paintObstacle(s.x, s.y, s.r, +1);
+    if (typeof undoStack !== 'undefined' && undoStack.length) {
+      replayObstacles();
     }
   } catch (e) {
     console.error(`[Fluid] Rebuild failed (${reason}); pausing.`, e);
@@ -134,20 +134,56 @@ const input = new InputHandler(canvas, handleSplat, CONFIG);
 function handleSplat(x, y, dx, dy, color) {
   // Obstacle-paint mode: the move callback paints solid mass instead of
   // injecting fluid. We rely on the InputHandler's per-move events for
-  // continuous painting along the drag path. We also persist each stroke
-  // so adaptive-resolution rebuilds can replay them onto the fresh FBO.
+  // continuous painting along the drag path. Each painted dab is also
+  // appended to the in-progress stroke object so adaptive-resolution
+  // rebuilds can replay the obstacle field, AND the user can undo the
+  // last drag as one logical unit.
   if (CONFIG.OBSTACLE_MODE) {
-    const r = CONFIG.OBSTACLE_PAINT_RADIUS;
-    fluid.paintObstacle(x, y, r, +1);
-    obstacleStrokes.push({ x, y, r });
-    if (obstacleStrokes.length > 4096) obstacleStrokes.splice(0, 512);
+    const r    = CONFIG.OBSTACLE_PAINT_RADIUS;
+    const sign = CONFIG.OBSTACLE_ERASE ? -1 : +1;
+    fluid.paintObstacle(x, y, r, sign);
+    if (currentStroke) {
+      currentStroke.dabs.push({ x, y, r, sign });
+    } else {
+      // Fallback for the very first move event arriving before the
+      // pointerdown listener (defensive): start a new stroke now so the
+      // dab is still recorded for replay.
+      currentStroke = { dabs: [{ x, y, r, sign }] };
+    }
     return;
   }
   fluid.splat(x, y, dx, dy, color);
 }
 
-/** Replayed onto a freshly-built fluid sim so obstacles survive resize / perf-mode. */
-const obstacleStrokes = [];
+/** Stack of completed obstacle strokes. Each stroke is the dabs of one
+ *  continuous pointer drag (paint or erase). Capped at UNDO_STACK_MAX;
+ *  oldest strokes silently drop off the bottom. Replayed onto a freshly
+ *  built fluid sim so obstacles survive resize / perf-mode toggles. */
+const undoStack = [];
+const UNDO_STACK_MAX = 64;
+
+/** The drag currently being assembled (between pointerdown and
+ *  pointerup). null when no drag is in progress. */
+let currentStroke = null;
+
+/** Number of active pointers currently down on the canvas in obstacle
+ *  mode; the ↶ Undo button is disabled while this is > 0 so the user
+ *  can't undo a half-drawn stroke that is still being recorded. */
+let obstacleActivePointers = 0;
+
+/** Re-paint the obstacle FBO from the entire undo stack. Called by the
+ *  Undo button after popping the last stroke, and by rebuildSubsystems
+ *  after a perf-mode toggle / adaptive downscale. */
+function replayObstacles() {
+  fluid.clearObstacles();
+  for (let i = 0; i < undoStack.length; i++) {
+    const dabs = undoStack[i].dabs;
+    for (let j = 0; j < dabs.length; j++) {
+      const d = dabs[j];
+      fluid.paintObstacle(d.x, d.y, d.r, d.sign);
+    }
+  }
+}
 
 /* ──────────────────────────────────────────────────────────────────────
    4b.  Source-placement mode (capture-phase, intercepts InputHandler)
@@ -194,6 +230,58 @@ canvas.addEventListener('pointercancel', (e) => {
 }, true);
 
 /* ──────────────────────────────────────────────────────────────────────
+   4c.  Obstacle-stroke lifecycle (paint or erase, one drag = one stroke)
+   --------------------------------------------------------------------
+   These listeners fire BEFORE the InputHandler's because they are
+   bound during construction order with the same canvas element; both
+   are non-capturing so the InputHandler still gets the event. We use
+   them only to bracket the drag — the actual dab recording happens
+   inside `handleSplat()` which the InputHandler already routes per
+   pointer move.
+   ────────────────────────────────────────────────────────────────────── */
+
+function obstacleDragStart(_e) {
+  if (!CONFIG.OBSTACLE_MODE) return;
+  obstacleActivePointers++;
+  // Always start a fresh stroke object on each new pointer; if multiple
+  // fingers are down we still funnel into one stroke (the dabs
+  // interleave) — that matches the user's mental model of "one editing
+  // session per drag" rather than "one stroke per finger".
+  if (!currentStroke) {
+    currentStroke = { dabs: [] };
+  }
+  // Disable undo while any pointer is down so the stack can't be
+  // popped mid-drag.
+  ui?.setUndoEnabled?.(false);
+}
+
+function obstacleDragEnd(_e) {
+  if (!CONFIG.OBSTACLE_MODE) {
+    // The pointer started in obstacle mode but the user toggled it off
+    // mid-drag; commit nothing and reset.
+    obstacleActivePointers = Math.max(0, obstacleActivePointers - 1);
+    if (obstacleActivePointers === 0) currentStroke = null;
+    return;
+  }
+  obstacleActivePointers = Math.max(0, obstacleActivePointers - 1);
+  if (obstacleActivePointers > 0) return;       // multi-finger; wait for last
+  if (!currentStroke) return;
+  // Drop empty drags so accidental taps don't fill the stack.
+  if (currentStroke.dabs.length > 0) {
+    undoStack.push(currentStroke);
+    if (undoStack.length > UNDO_STACK_MAX) {
+      undoStack.splice(0, undoStack.length - UNDO_STACK_MAX);
+    }
+  }
+  currentStroke = null;
+  ui?.setUndoEnabled?.(undoStack.length > 0);
+}
+
+canvas.addEventListener('pointerdown',  obstacleDragStart);
+canvas.addEventListener('pointerup',    obstacleDragEnd);
+canvas.addEventListener('pointercancel',obstacleDragEnd);
+
+/* ──────────────────────────────────────────────────────────────────────
    5.  UI
    ────────────────────────────────────────────────────────────────────── */
 
@@ -201,7 +289,9 @@ const ui = new UI(CONFIG, {
   onReset() {
     fluid.reset();
     fluid.clearObstacles();
-    obstacleStrokes.length = 0;
+    undoStack.length = 0;
+    currentStroke    = null;
+    ui?.setUndoEnabled?.(false);
     CONFIG.SOURCES.length  = 0;
     ui?.refreshSources?.();
   },
@@ -239,7 +329,18 @@ const ui = new UI(CONFIG, {
   onColorModeChange(_mode) { /* nothing to rebuild — splat callers re-read CONFIG */ },
   onClearObstacles() {
     fluid.clearObstacles();
-    obstacleStrokes.length = 0;
+    undoStack.length = 0;
+    currentStroke    = null;
+    ui?.setUndoEnabled?.(false);
+  },
+  onObstacleUndo() {
+    // Disabled while a drag is in progress to prevent undoing a
+    // half-recorded stroke.
+    if (obstacleActivePointers > 0) return;
+    if (undoStack.length === 0) return;
+    undoStack.pop();
+    replayObstacles();
+    ui?.setUndoEnabled?.(undoStack.length > 0);
   },
   onClearPersisted() {
     clearPersistedStorage();

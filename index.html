@@ -27,6 +27,8 @@
       <button id="btn-audio" class="ui-btn" data-tip="Microphone reactivity" aria-label="Audio reactivity">🎤</button>
       <button id="btn-tilt" class="ui-btn" data-tip="Tilt to stir (uses device motion)" aria-label="Tilt reactivity">🧭</button>
       <button id="btn-obstacles" class="ui-btn" data-tip="Paint obstacles (drag on canvas)" aria-label="Paint obstacles">🧱</button>
+      <button id="btn-erase" class="ui-btn" data-tip="Erase obstacles" aria-label="Erase obstacles">🩹</button>
+      <button id="btn-undo" class="ui-btn" data-tip="Undo last obstacle stroke" aria-label="Undo obstacle stroke" disabled>↶</button>
       <button id="btn-clear-obstacles" class="ui-btn" data-tip="Clear obstacles" aria-label="Clear obstacles">🧽</button>
       <button id="btn-source" class="ui-btn" data-tip="Place permanent source (drag = direction, tap to remove)" aria-label="Place source">💠</button>
       <button id="btn-pause" class="ui-btn" data-tip="Pause (space)" aria-label="Pause">⏸</button>
@@ -43,6 +45,11 @@
       <div class="ui-slider-group">
         <label for="slider-dissipation">Persistence</label>
         <input type="range" id="slider-dissipation" min="0" max="100" value="65" step="1" data-tip="How long dye/velocity persist" aria-label="Persistence">
+      </div>
+
+      <div class="ui-slider-group" id="slider-group-brush" hidden>
+        <label for="slider-brush">Brush</label>
+        <input type="range" id="slider-brush" min="0" max="100" value="35" step="1" data-tip="Obstacle brush size" aria-label="Brush size">
       </div>
 
       <div class="ui-slider-group">

@@ -65,6 +65,7 @@ export const PERSISTED_SLIDER_IDS = Object.freeze([
   'slider-force',
   'slider-dissipation',
   'slider-viscosity',
+  'slider-brush',
 ]);
 
 /** Maximum number of sources encoded into a share link. Persistence stores

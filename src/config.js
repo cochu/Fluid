@@ -213,6 +213,14 @@ export const CONFIG = {
   SOURCE_MODE: false,
 
   /**
+   * When true *and* OBSTACLE_MODE is also true, drags subtract from the
+   * obstacle field (eraser) instead of adding. Toggled by 🩹. Not
+   * persisted — eraser is a transient editing mode, not a scene
+   * property.
+   */
+  OBSTACLE_ERASE: false,
+
+  /**
    * User-explicit performance mode. Distinct from the live SIM_RESOLUTION
    * (which adaptive downscale also rewrites): this captures the user's
    * intent so persistence can restore the perf-mode preset on reload

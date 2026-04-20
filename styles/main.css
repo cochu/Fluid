@@ -128,6 +128,16 @@ html, body {
   box-shadow: none;
 }
 
+/* Disabled buttons (e.g. ↶ Undo when the obstacle stack is empty or
+   while a drag is in progress). Greyed visually + cursor-not-allowed
+   so the affordance is read as "not available right now". */
+.ui-btn:disabled,
+.ui-btn.is-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* Drag-source button (drop particles) — animated affordance so users
    discover the drag interaction without needing a written instruction. */
 .ui-btn-drag {

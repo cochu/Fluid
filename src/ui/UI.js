@@ -71,6 +71,20 @@ function persistenceFromSlider(t) {
   return 0.92 + (0.999 - 0.92) * (u * u * (3 - 2 * u));   // smoothstep
 }
 
+/**
+ * Obstacle brush slider 0..100 → OBSTACLE_PAINT_RADIUS (UV fraction of
+ * the shorter screen side).
+ *   - 0   → 0.005  (single-pixel pen)
+ *   - 35  → ~0.017 (current visual default — see config.js comment)
+ *   - 100 → 0.10   (broad swath, ~1/10 of canvas)
+ * Quadratic so fine sizes near 0 are easy to dial in while still
+ * reaching a fat brush at the top.
+ */
+function brushFromSlider(t) {
+  const u = Math.max(0, Math.min(1, t / 100));
+  return 0.005 + 0.095 * u * u;
+}
+
 import { COLOR_MODE_LABELS, nextMode } from '../input/Palettes.js';
 import { PRESETS, nextPresetId, applyPreset, getPreset } from '../presets.js';
 
@@ -337,21 +351,89 @@ export class UI {
      ────────────────────────────────────────────────────────────────── */
 
   _bindObstacleButtons() {
+    const cfg = this._config;
+
+    // Helper that updates the brush-slider group visibility — it appears
+    // only while obstacle mode is on (progressive disclosure per Marcus).
+    const brushGroup = document.getElementById('slider-group-brush');
+    const refreshBrushVisibility = () => {
+      if (!brushGroup) return;
+      brushGroup.hidden = !cfg.OBSTACLE_MODE;
+    };
+
     this._bind('btn-obstacles', 'click', () => {
-      const want = !this._config.OBSTACLE_MODE;
+      const want = !cfg.OBSTACLE_MODE;
       // Mutually exclusive with source-place mode.
-      if (want) this._config.SOURCE_MODE = false;
-      this._config.OBSTACLE_MODE = want;
+      if (want) cfg.SOURCE_MODE = false;
+      cfg.OBSTACLE_MODE = want;
+      // Toggling obstacle mode off also exits the eraser sub-mode so
+      // the next time the user enters obstacle mode they start in the
+      // expected default (paint, not erase).
+      if (!want) cfg.OBSTACLE_ERASE = false;
       this._toggle('btn-obstacles', want);
-      this._toggle('btn-source', this._config.SOURCE_MODE);
+      this._toggle('btn-source',    cfg.SOURCE_MODE);
+      this._toggle('btn-erase',     cfg.OBSTACLE_ERASE);
+      refreshBrushVisibility();
       const btn = document.getElementById('btn-obstacles');
       if (btn) this._flashTip(btn, want ? 'Drag to paint walls' : 'Obstacle mode off');
     });
+
+    this._bind('btn-erase', 'click', () => {
+      const want = !cfg.OBSTACLE_ERASE;
+      cfg.OBSTACLE_ERASE = want;
+      // Erasing only makes sense inside obstacle mode — auto-enable it
+      // on first toggle so the user doesn't have to two-tap.
+      if (want && !cfg.OBSTACLE_MODE) {
+        cfg.OBSTACLE_MODE = true;
+        cfg.SOURCE_MODE   = false;
+        this._toggle('btn-obstacles', true);
+        this._toggle('btn-source',    false);
+        refreshBrushVisibility();
+      }
+      this._toggle('btn-erase', want);
+      const btn = document.getElementById('btn-erase');
+      if (btn) this._flashTip(btn, want ? 'Drag to erase walls' : 'Eraser off');
+    });
+
     this._bind('btn-clear-obstacles', 'click', () => {
       this._cb.onClearObstacles?.();
       const btn = document.getElementById('btn-clear-obstacles');
       if (btn) this._flashTip(btn, 'Obstacles cleared');
+      // A full clear nukes the undo stack too — those strokes can never
+      // be replayed onto a meaningful state. The callback owner clears
+      // the stack; we just refresh button visuals here.
+      this.setUndoEnabled(false);
     });
+
+    this._bind('btn-undo', 'click', () => {
+      this._cb.onObstacleUndo?.();
+    });
+
+    // Brush slider — quadratic curve mapped to OBSTACLE_PAINT_RADIUS.
+    const brushSlider = document.getElementById('slider-brush');
+    if (brushSlider) {
+      // Apply the slider's initial DOM value once so a persisted
+      // restore (which sets el.value before this binding runs) takes
+      // effect on first render too.
+      cfg.OBSTACLE_PAINT_RADIUS = brushFromSlider(Number(brushSlider.value));
+      brushSlider.addEventListener('input', (e) => {
+        cfg.OBSTACLE_PAINT_RADIUS = brushFromSlider(Number(e.target.value));
+      });
+    }
+
+    refreshBrushVisibility();
+  }
+
+  /**
+   * Enable / disable the ↶ Undo button. main.js calls this whenever
+   * the undo stack capacity or the active-pointer-count flips, so the
+   * button visual matches reality without UI snooping into the stack.
+   */
+  setUndoEnabled(on) {
+    const btn = document.getElementById('btn-undo');
+    if (!btn) return;
+    btn.disabled = !on;
+    btn.classList.toggle('is-disabled', !on);
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -783,7 +865,11 @@ export class UI {
     this._toggle('btn-tilt',      this._config.TILT_REACTIVE);
     this._toggle('btn-obstacles', this._config.OBSTACLE_MODE);
     this._toggle('btn-source',    this._config.SOURCE_MODE);
+    this._toggle('btn-erase',     this._config.OBSTACLE_ERASE);
     this._toggle('btn-wallpaper', this._config.WALLPAPER_MODE);
+    // Brush slider group visibility is tied to obstacle mode.
+    const brushGroup = document.getElementById('slider-group-brush');
+    if (brushGroup) brushGroup.hidden = !this._config.OBSTACLE_MODE;
     // Reflect the user-explicit perf-mode flag (the button's visual state
     // mirrors CONFIG.PERF_MODE, not the live SIM_RESOLUTION which adaptive
     // downscale can mutate transiently).
