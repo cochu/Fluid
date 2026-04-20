@@ -645,7 +645,13 @@ void main() {
 
     if (uUseBloom) {
         vec3 bloom = texture(uBloom, vUv).rgb;
-        c += bloom * uBloomIntensity;
+        // Linear bloom + quadratic kicker. The squared term turns the
+        // brightest 10-20% of the bloom into a real hotspot once tone-
+        // mapped — this is what separates a "punchy" bloom from the
+        // washy linear-add look. Coefficient 0.55 keeps mid-bright
+        // dye glowing softly; the kicker dominates only at the cores.
+        c += bloom * uBloomIntensity
+           + bloom * bloom * (uBloomIntensity * 0.55);
     }
 
     if (uShading) {
@@ -700,12 +706,19 @@ uniform float uSoftKnee;
 out vec4 fragColor;
 void main() {
     vec3 c = texture(uTexture, vUv).rgb;
-    float brightness = max(c.r, max(c.g, c.b));
+    // Mix max-channel with perceptual luminance so a bright but
+    // saturated colour (e.g. a deep blue splat) still emits some glow,
+    // not just near-white overlaps.
+    float maxc = max(c.r, max(c.g, c.b));
+    float lum  = dot(c, vec3(0.299, 0.587, 0.114));
+    float brightness = mix(maxc, lum, 0.35);
     // Soft-knee threshold curve
     float rq = clamp(brightness - uThreshold + uSoftKnee, 0.0, 2.0 * uSoftKnee);
     rq       = (rq * rq) / (4.0 * uSoftKnee + 0.00001);
     float w  = max(rq, brightness - uThreshold) / max(brightness, 0.00001);
-    fragColor = vec4(c * w, 1.0);
+    // 1.6× extra fuel for the blur cascade so the halo carries colour
+    // through 8 iterations of in-place Gaussian without going milky.
+    fragColor = vec4(c * w * 1.6, 1.0);
 }
 `;
 
@@ -904,13 +917,17 @@ void main() {
 /**
  * Particle render – FRAGMENT shader.
  *
- * Calm aquatic droplet:
- *   - soft circular Gaussian body + tighter inner core
+ * Luminous aquatic droplet that plays with light:
+ *   - wide soft halo + body Gaussian + tight core (three-stop falloff)
  *   - deep ocean → cyan colour gradient driven by core falloff and speed
- *   - a single offset specular highlight (light from above-left)
- * No anisotropic stretch, no caustic ring, no fresnel — at small point
- * sizes those layers read as shader noise rather than water. The fluid
- * field already supplies all the motion language.
+ *   - primary specular highlight (light from above-left) + secondary
+ *     reflection on the opposite quadrant for a "wet" double-catch
+ *   - soft fresnel rim at the silhouette so the bead reads as 3D
+ *   - premultiplied RGB is intentionally overdriven beyond alpha so
+ *     particles act as additive light sources where they overlap dye
+ * No anisotropic stretch, no caustic ring — at small point sizes those
+ * read as shader noise rather than water. The fluid field already
+ * supplies all the motion language.
  */
 export const PARTICLE_RENDER_FRAG = /* glsl */`#version 300 es
 precision highp float;
@@ -921,7 +938,7 @@ in vec2  vVelDir;
 in float vSeed;
 
 uniform vec3  uColor;     // accent tint (multiplied into the gradient)
-uniform float uTime;      // seconds (kept for future use; currently unused)
+uniform float uTime;      // seconds (drives a subtle highlight breath)
 uniform float uTintMix;   // 0 = pure aqua palette, 1 = blend with uColor
 
 out vec4 fragColor;
@@ -929,32 +946,58 @@ out vec4 fragColor;
 void main() {
     vec2  d  = gl_PointCoord - 0.5;
     float r2 = dot(d, d);
+    float r  = sqrt(r2);
 
-    // Soft circular body + tighter core — a small water bead.
+    // Three falloffs: a wide halo for atmospheric glow, a softer body
+    // for the bead, and a tight core for the bright pinprick centre.
+    float halo = exp(-r2 *  6.0);
     float body = exp(-r2 * 18.0);
     float core = exp(-r2 * 42.0);
 
-    // Single faux specular: light from above-left, narrow falloff.
-    vec2  h    = d - vec2(-0.12, 0.14);
-    float spec = exp(-dot(h, h) * 110.0) * 0.45;
+    // Primary specular: light from above-left, narrow falloff. Slight
+    // breath from uTime + vSeed gives a living-medium twinkle without
+    // being strobe-y (each particle phases independently).
+    vec2  h1   = d - vec2(-0.12, 0.14);
+    float spec = exp(-dot(h1, h1) * 110.0)
+               * (0.85 + 0.25 * sin(uTime * 2.3 + vSeed * 6.2831));
+    // Secondary "wet" reflection: dimmer, opposite quadrant, wider —
+    // this is what makes water beads read as glassy rather than matte.
+    vec2  h2    = d - vec2(0.16, -0.10);
+    float spec2 = exp(-dot(h2, h2) * 55.0) * 0.18;
+
+    // Fresnel-like rim ring: the silhouette catches more "light" than
+    // the centre, like a backlit droplet. Peaks near r ≈ 0.46 and dies
+    // before the sprite edge so there's no hard cutout.
+    float rim = smoothstep(0.32, 0.46, r) * (1.0 - smoothstep(0.46, 0.50, r));
 
     float speed = clamp(length(vVelocity) * 0.10, 0.0, 1.0);
 
     vec3  deep = vec3(0.02, 0.10, 0.26);
     vec3  cyan = vec3(0.18, 0.78, 0.95);
-    vec3  base = mix(deep, cyan, 0.35 + 0.30 * core + 0.15 * speed);
+    vec3  base = mix(deep, cyan, 0.35 + 0.30 * core + 0.20 * speed);
 
     // Tint kept subtle so the aqua palette dominates.
-    base = mix(base, base * max(uColor, vec3(0.45)), uTintMix * 0.25);
+    base = mix(base, base * max(uColor, vec3(0.45)), uTintMix * 0.30);
 
-    vec3  rgb = base * (0.55 * body + 0.80 * core)
-              + vec3(0.75, 0.93, 1.00) * spec;
+    // Brighter inner volume, plus the two specular catches and the rim.
+    vec3 highlight    = vec3(0.78, 0.95, 1.00);
+    vec3 highlightAlt = vec3(0.55, 0.85, 1.00);
+    vec3  rgb = base * (0.40 * halo + 0.85 * body + 1.30 * core)
+              + highlight    * (spec + 0.55 * core)
+              + highlightAlt * spec2
+              + vec3(0.45, 0.80, 1.00) * rim * 0.55;
 
-    float alpha = clamp(0.55 * body + 0.35 * core + spec, 0.0, 0.85);
+    // Alpha drives compositing strength; halo participates only weakly
+    // so the aquatic glow doesn't bruise the dye underneath.
+    float alpha = clamp(0.22 * halo + 0.55 * body + 0.40 * core + spec * 0.6,
+                        0.0, 0.92);
 
     if (alpha < 0.02) discard;
     // Premultiplied alpha — main.js uses (ONE, ONE_MINUS_SRC_ALPHA).
-    fragColor = vec4(rgb * alpha, alpha);
+    // We deliberately let the premultiplied RGB exceed alpha at the
+    // bright cores: this gives an additive HDR feel (luminous beads
+    // overlapping each other read as light, not as opaque paint).
+    fragColor = vec4(rgb * (0.55 + 0.85 * alpha), alpha);
 }
 `;
 

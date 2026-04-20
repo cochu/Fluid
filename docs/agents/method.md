@@ -117,10 +117,18 @@ When you don't have time for the full three-phase loop (truly trivial fixes:
 typo, dead-code removal, comment polish), you may skip Phase A and run only:
 
 - A **single Erik pass** on the diff (regressions).
+- The **`boot` suite of `tests/test.html` is green** (always — even on
+  trivial diffs that *look* unable to break boot, because the cost is 5 s
+  and the historical hit rate is non-zero; PR #8 was a one-line `const`
+  addition that nobody thought could brick the page).
 - The **poem in the commit** (always — this is non-negotiable).
 
 For anything that touches `FluidSimulation.js`, `Shaders.js`, the input
-pipeline, or new UI surfaces: full three-phase.
+pipeline, or new UI surfaces: full three-phase. Anything that touches
+`src/main.js` or its imports — even a single line — additionally requires
+the explicit *"checked gotcha #13 (TDZ)"* note in the commit body and a
+boot-order sweep per [`personas/erik-qa.md`](personas/erik-qa.md#eriks-review-checklist)
+item 3.
 
 ---
 

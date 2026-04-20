@@ -32,18 +32,27 @@ each of the 10 gotchas at least once.
 
 1. **Read `gotchas.md` end-to-end.** Yes, again. Every entry. For each one:
    does this diff plausibly re-introduce that failure? If unsure, smoke-test.
-2. **Run the browser smoke checklist** from `workflows.md#3`.
-3. **Toggle the new feature 5 times in a row.** Memory creep? Console errors?
+2. **Run the browser smoke checklist** from `workflows.md#3` — and **always
+   start by opening `tests/test.html` and confirming the `boot` suite is
+   green.** That suite is the only thing in the harness that actually
+   evaluates `main.js`; every other suite imports leaf modules.
+3. **Boot-order audit on any new top-level `const`/`let` in `main.js`** (or
+   any module on the boot path). For each new binding, confirm that no
+   eager reference precedes its declaration — including inside object
+   literals passed to constructors (e.g. the `new UI(CONFIG, { … })`
+   options literal). This is `gotchas.md#13`. Method-shorthand keys are
+   fine; bare value expressions are not.
+4. **Toggle the new feature 5 times in a row.** Memory creep? Console errors?
    Visual artefacts that accumulate?
-4. **Toggle adaptive resolution down then up.** Did the new feature survive
+5. **Toggle adaptive resolution down then up.** Did the new feature survive
    `rebuildSubsystems()`? Are its FBOs in `destroy()`?
-5. **Test on a fresh profile / private window.** Does the page load with no
+6. **Test on a fresh profile / private window.** Does the page load with no
    console errors at all? (Service worker errors don't count on `file://` —
    those are expected.)
-6. **Test the permission-denied path** for any new permission-gated feature.
-7. **Test the snapshot.** After any rendering change, take a snapshot and
+7. **Test the permission-denied path** for any new permission-gated feature.
+8. **Test the snapshot.** After any rendering change, take a snapshot and
    verify the PNG isn't blank.
-8. **Test pause/resume.** Does the new feature interact correctly with pause?
+9. **Test pause/resume.** Does the new feature interact correctly with pause?
    No silent ticking? No state drift across pause?
 
 ## Erik's pet peeves (auto-flag)
@@ -51,6 +60,10 @@ each of the 10 gotchas at least once.
 - "I tested it on my machine." Numerator/denominator — where's the smoke run?
 - A diff that touches `Shaders.js` or `FluidSimulation.js` without an
   explicit *"checked gotcha #1 (trame)"* note.
+- A diff that adds a top-level `const`/`let` in `main.js` (or modifies
+  the `new UI(CONFIG, { … })` options literal) without a *"checked
+  gotcha #13 (TDZ)"* note **and** a fresh green run of the `boot`
+  suite. PR #8 is the cautionary tale here.
 - A new event listener with no removal path.
 - A `console.log` in committed code.
 - A try/catch with an empty handler and no comment explaining why a silent
