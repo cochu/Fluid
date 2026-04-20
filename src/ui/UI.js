@@ -356,6 +356,7 @@ export class UI {
     this._bindSpawnButton();
     this._bindObstacleButtons();
     this._bindSourceButton();
+    this._bindSinkButton();
     this._bindPresetButton();
     this._bindShareButton();
     this._bindResetLongPress();
@@ -379,8 +380,11 @@ export class UI {
 
     this._bind('btn-obstacles', 'click', () => {
       const want = !cfg.OBSTACLE_MODE;
-      // Mutually exclusive with source-place mode.
-      if (want) cfg.SOURCE_MODE = false;
+      // Mutually exclusive with source / sink placement modes.
+      if (want) {
+        cfg.SOURCE_MODE = false;
+        cfg.SINK_MODE   = false;
+      }
       cfg.OBSTACLE_MODE = want;
       // Toggling obstacle mode off also exits the eraser sub-mode so
       // the next time the user enters obstacle mode they start in the
@@ -388,6 +392,7 @@ export class UI {
       if (!want) cfg.OBSTACLE_ERASE = false;
       this._toggle('btn-obstacles', want);
       this._toggle('btn-source',    cfg.SOURCE_MODE);
+      this._toggle('btn-sink',      cfg.SINK_MODE);
       this._toggle('btn-erase',     cfg.OBSTACLE_ERASE);
       refreshBrushVisibility();
       const btn = document.getElementById('btn-obstacles');
@@ -402,8 +407,10 @@ export class UI {
       if (want && !cfg.OBSTACLE_MODE) {
         cfg.OBSTACLE_MODE = true;
         cfg.SOURCE_MODE   = false;
+        cfg.SINK_MODE     = false;
         this._toggle('btn-obstacles', true);
         this._toggle('btn-source',    false);
+        this._toggle('btn-sink',      false);
         refreshBrushVisibility();
       }
       this._toggle('btn-erase', want);
@@ -459,10 +466,15 @@ export class UI {
   _bindSourceButton() {
     this._bind('btn-source', 'click', () => {
       const want = !this._config.SOURCE_MODE;
-      if (want) this._config.OBSTACLE_MODE = false;
+      // Mutex with the other canvas-editing modes.
+      if (want) {
+        this._config.OBSTACLE_MODE = false;
+        this._config.SINK_MODE     = false;
+      }
       this._config.SOURCE_MODE = want;
       this._toggle('btn-source', want);
       this._toggle('btn-obstacles', this._config.OBSTACLE_MODE);
+      this._toggle('btn-sink',      this._config.SINK_MODE);
       const btn = document.getElementById('btn-source');
       if (btn) this._flashTip(btn, want ? 'Drag on canvas to place a source' : 'Source mode off');
       this._renderSources();
@@ -470,6 +482,24 @@ export class UI {
     this._svgOverlay = document.getElementById('sources-overlay');
     this._renderSources();
     window.addEventListener('resize', () => this._renderSources());
+  }
+
+  _bindSinkButton() {
+    this._bind('btn-sink', 'click', () => {
+      const want = !this._config.SINK_MODE;
+      // Mutex with source / obstacle modes.
+      if (want) {
+        this._config.OBSTACLE_MODE = false;
+        this._config.SOURCE_MODE   = false;
+      }
+      this._config.SINK_MODE = want;
+      this._toggle('btn-sink',      want);
+      this._toggle('btn-source',    this._config.SOURCE_MODE);
+      this._toggle('btn-obstacles', this._config.OBSTACLE_MODE);
+      const btn = document.getElementById('btn-sink');
+      if (btn) this._flashTip(btn, want ? 'Tap on canvas to place a sink' : 'Sink mode off');
+      this._renderSources();
+    });
   }
 
   /** Re-paint the SVG markers + arrows from CONFIG.SOURCES. */
@@ -496,6 +526,20 @@ export class UI {
         const s = list[i];
         const px = s.x * w;
         const py = (1 - s.y) * h;
+        if (s.kind === 'sink') {
+          // Sinks are non-directional — render a darker hollow ring
+          // with a minus sign so the affordance reads as "drain", and
+          // visually distinct from the bright source dots/arrows.
+          html += `<g class="src" data-i="${i}">`
+               +  `<circle cx="${px}" cy="${py}" r="11" `
+               +  `fill="rgba(0,0,0,0.35)" stroke="rgba(255,255,255,0.85)" `
+               +  `stroke-width="2" stroke-dasharray="3 2"/>`
+               +  `<line x1="${px - 5}" y1="${py}" x2="${px + 5}" y2="${py}" `
+               +  `stroke="rgba(255,255,255,0.95)" stroke-width="2" stroke-linecap="round"/>`
+               +  `<circle cx="${px}" cy="${py}" r="16" fill="transparent" class="src-hit"/>`
+               +  `</g>`;
+          continue;
+        }
         const len = Math.hypot(s.dx, s.dy);
         const k   = len > 0 ? Math.min(80, 60 + len * 30) : 0;
         const ex  = px + (len ? (s.dx / len) * k : 0);
@@ -1111,6 +1155,7 @@ export class UI {
     this._toggle('btn-midi',      this._config.MIDI_REACTIVE);
     this._toggle('btn-obstacles', this._config.OBSTACLE_MODE);
     this._toggle('btn-source',    this._config.SOURCE_MODE);
+    this._toggle('btn-sink',      this._config.SINK_MODE);
     this._toggle('btn-erase',     this._config.OBSTACLE_ERASE);
     this._toggle('btn-wallpaper', this._config.WALLPAPER_MODE);
     // Brush slider group visibility is tied to obstacle mode.

@@ -101,6 +101,40 @@ void main() {
 `;
 
 /**
+ * Painted-sink dye drain. Multiplies the existing dye RGB by
+ * (1 - uAmount * gauss(r)) clamped to [0, 1]. This:
+ *   - never injects negative dye into the RGBA16F buffer (which would
+ *     persist invisibly and re-emerge via bloom or additive splats),
+ *   - acts as a *fraction* removal so already-light areas drain less in
+ *     absolute terms than already-bright ones (visually natural drain),
+ *   - leaves velocity untouched — sinks are dye-only in v1; the
+ *     ambient VELOCITY_DISSIPATION carries the slowdown.
+ *
+ * Reuses the SPLAT_FRAG uniform layout (uTarget/uPoint/uRadius/uAspectRatio)
+ * so the JS-side draw loop can swap between additive and drain passes
+ * without rebinding the full uniform set.
+ */
+export const SINK_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uTarget;
+uniform float uAspectRatio;
+uniform float uAmount;
+uniform vec2  uPoint;
+uniform float uRadius;
+out vec4 fragColor;
+void main() {
+    vec2 p = vUv - uPoint;
+    p.x   *= uAspectRatio;
+    float g = exp(-dot(p, p) / uRadius);
+    float k = clamp(1.0 - uAmount * g, 0.0, 1.0);
+    vec3 dye = texture(uTarget, vUv).rgb * k;
+    fragColor = vec4(dye, 1.0);
+}
+`;
+
+/**
  * Semi-Lagrangian advection with manual bilinear interpolation.
  *
  * Works for both velocity self-advection (dyeTexelSize == velTexelSize)

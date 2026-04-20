@@ -273,6 +273,21 @@ export const CONFIG = {
   /** Master enable for the source-placement pointer mode. Toggled by 💠. */
   SOURCE_MODE: false,
 
+  /** Master enable for the sink-placement pointer mode. Toggled by 🕳.
+   *  Mutex with SOURCE_MODE and OBSTACLE_MODE — only one editing mode
+   *  is active at a time. A "sink" is a SOURCES entry with `kind:'sink'`
+   *  (no dx/dy/color) that drains dye from a Gaussian neighbourhood
+   *  each frame. Not persisted — placement mode is transient. */
+  SINK_MODE: false,
+
+  /** Per-frame fraction of dye drained at the centre of each sink, in
+   *  units of "fraction-removed/sec at peak". 1.5 corresponds to ~78%
+   *  drained over a second at the bull's-eye of an undisturbed sink —
+   *  a visible drain that lets transient brush-overs survive a moment
+   *  before fading. Multiplied by `dt` and `rate` per frame so behaviour
+   *  is frame-rate independent. */
+  SINK_RATE: 1.5,
+
   /**
    * When true *and* OBSTACLE_MODE is also true, drags subtract from the
    * obstacle field (eraser) instead of adding. Toggled by 🩹. Not

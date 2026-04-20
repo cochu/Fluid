@@ -28,6 +28,7 @@ import {
   COPY_FRAG,
   CLEAR_FRAG,
   SPLAT_FRAG,
+  SINK_FRAG,
   ADVECTION_FRAG,
   ADVECTION_REVERSE_FRAG,
   MACCORMACK_FRAG,
@@ -109,6 +110,7 @@ export class FluidSimulation {
       copy:             createProgram(gl, SIMPLE_VERT, COPY_FRAG),
       clear:            createProgram(gl, SIMPLE_VERT, CLEAR_FRAG),
       splat:            createProgram(gl, SIMPLE_VERT, SPLAT_FRAG),
+      sink:             createProgram(gl, SIMPLE_VERT, SINK_FRAG),
       advection:        createProgram(gl, SIMPLE_VERT, ADVECTION_FRAG),
       advectionRev:     createProgram(gl, SIMPLE_VERT, ADVECTION_REVERSE_FRAG),
       maccormack:       createProgram(gl, SIMPLE_VERT, MACCORMACK_FRAG),
@@ -281,6 +283,32 @@ export class FluidSimulation {
     // --- dye splat ---
     gl.uniform1i(uniforms.uTarget, this.dye.read.attach(0));
     gl.uniform3f(uniforms.uColor, color.r, color.g, color.b);
+    gl.uniform1f(uniforms.uRadius, config.SPLAT_RADIUS / 100);
+    this._blit(this.dye.write.fbo, this.dye.write.width, this.dye.write.height);
+    this.dye.swap();
+  }
+
+  /**
+   * Drain dye in a Gaussian neighbourhood. Multiplicative — dye RGB at
+   * each pixel is scaled by `(1 - amount * gauss(r))`, clamped to 0.
+   * Velocity is intentionally untouched (sinks are dye-only in v1).
+   *
+   * @param {number} x       UV x [0, 1]
+   * @param {number} y       UV y [0, 1]
+   * @param {number} amount  Peak drain fraction at the centre this
+   *                         frame (e.g. 0.05 removes 5 % per frame at
+   *                         the bull's-eye, less in the falloff).
+   */
+  drainDye(x, y, amount) {
+    const { gl, config } = this;
+    if (!(amount > 0)) return;
+    const aspectRatio = gl.canvas.width / gl.canvas.height;
+    const { program, uniforms } = this._prog.sink;
+    gl.useProgram(program);
+    gl.uniform1i(uniforms.uTarget, this.dye.read.attach(0));
+    gl.uniform1f(uniforms.uAspectRatio, aspectRatio);
+    gl.uniform1f(uniforms.uAmount, amount);
+    gl.uniform2f(uniforms.uPoint, x, y);
     gl.uniform1f(uniforms.uRadius, config.SPLAT_RADIUS / 100);
     this._blit(this.dye.write.fbo, this.dye.write.width, this.dye.write.height);
     this.dye.swap();

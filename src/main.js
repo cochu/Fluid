@@ -199,12 +199,36 @@ function pointerToUV(e) {
   };
 }
 canvas.addEventListener('pointerdown', (e) => {
+  if (CONFIG.SINK_MODE) {
+    // Sink placement is single-tap, no drag direction. Capture and
+    // commit on pointerup so an accidental drag doesn't drop multiple
+    // sinks.
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    sourceDragStart = pointerToUV(e);
+    return;
+  }
   if (!CONFIG.SOURCE_MODE) return;
   e.preventDefault();
   e.stopImmediatePropagation();
   sourceDragStart = pointerToUV(e);
 }, true);
 canvas.addEventListener('pointerup', (e) => {
+  if (CONFIG.SINK_MODE) {
+    if (!sourceDragStart) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    // Honour the *down* position rather than up, so a tiny finger drift
+    // doesn't relocate the marker away from where the user aimed.
+    CONFIG.SOURCES.push({
+      kind: 'sink',
+      x: sourceDragStart.x, y: sourceDragStart.y,
+      rate: 1,
+    });
+    ui.refreshSources?.();
+    sourceDragStart = null;
+    return;
+  }
   if (!CONFIG.SOURCE_MODE || !sourceDragStart) return;
   e.preventDefault();
   e.stopImmediatePropagation();
@@ -226,7 +250,7 @@ canvas.addEventListener('pointerup', (e) => {
   sourceDragStart = null;
 }, true);
 canvas.addEventListener('pointercancel', (e) => {
-  if (!CONFIG.SOURCE_MODE) return;
+  if (!CONFIG.SOURCE_MODE && !CONFIG.SINK_MODE) return;
   sourceDragStart = null;
 }, true);
 
@@ -612,9 +636,22 @@ function animate(now) {
     // jet without saturating the dissipation budget.
     const colorScale = dt * 3.5;
     const velScale   = dt * 15;
+    const sinkScale  = dt * (CONFIG.SINK_RATE ?? 1.5);
     for (let i = 0; i < sources.length; i++) {
       const s = sources[i];
       const r = s.rate ?? 1;
+      if (s.kind === 'sink') {
+        // Multiplicative dye drain via the dedicated sink shader. The
+        // amount is scaled per-frame so the visible effect at 60 fps
+        // matches the SINK_RATE knob (units: fraction-removed/sec at
+        // the centre). Velocity is left untouched — pulling fluid in
+        // would require a true divergence sink, which a v2 can layer
+        // on top without changing the schema. The ambient
+        // VELOCITY_DISSIPATION carries the slowdown.
+        const amount = Math.min(0.95, sinkScale * r);
+        fluid.drainDye(s.x, s.y, amount);
+        continue;
+      }
       const c = {
         r: s.color.r * colorScale * r,
         g: s.color.g * colorScale * r,

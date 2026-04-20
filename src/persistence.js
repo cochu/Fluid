@@ -173,15 +173,28 @@ function sanitiseSources(arr) {
   for (const s of arr) {
     if (!s || typeof s !== 'object') continue;
     const x  = +s.x,  y  = +s.y;
-    const dx = +s.dx, dy = +s.dy;
     if (!Number.isFinite(x) || !Number.isFinite(y))   continue;
+    // Discriminator: 'sink' = drain entry (no direction or colour),
+    // anything else (including missing) is treated as a regular source
+    // for backward compatibility with snapshots written before sinks
+    // existed.
+    const kind = s.kind === 'sink' ? 'sink' : 'source';
+    const rate = Number.isFinite(+s.rate) ? +s.rate : 1;
+    if (kind === 'sink') {
+      out.push({
+        kind: 'sink',
+        x: clamp01(x), y: clamp01(y),
+        rate,
+      });
+      continue;
+    }
+    const dx = +s.dx, dy = +s.dy;
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
     const c = (s.color && typeof s.color === 'object') ? {
       r: Number(s.color.r) || 0,
       g: Number(s.color.g) || 0,
       b: Number(s.color.b) || 0,
     } : { r: 0, g: 0, b: 0 };
-    const rate = Number.isFinite(+s.rate) ? +s.rate : 1;
     out.push({
       x: clamp01(x), y: clamp01(y),
       dx, dy,
