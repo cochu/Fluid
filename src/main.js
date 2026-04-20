@@ -190,7 +190,11 @@ function replayObstacles() {
    4b.  Source-placement mode (capture-phase, intercepts InputHandler)
    ────────────────────────────────────────────────────────────────────── */
 
-let sourceDragStart = null;
+// Per-pointer drag-start map. Multi-touch in source/sink mode used to
+// trample a single global with each subsequent finger; keying on
+// pointerId lets two-finger rapid placement commit two distinct
+// markers at the correct positions.
+const sourceDragStarts = new Map();
 function pointerToUV(e) {
   const rect = canvas.getBoundingClientRect();
   return {
@@ -205,36 +209,37 @@ canvas.addEventListener('pointerdown', (e) => {
     // sinks.
     e.preventDefault();
     e.stopImmediatePropagation();
-    sourceDragStart = pointerToUV(e);
+    sourceDragStarts.set(e.pointerId, pointerToUV(e));
     return;
   }
   if (!CONFIG.SOURCE_MODE) return;
   e.preventDefault();
   e.stopImmediatePropagation();
-  sourceDragStart = pointerToUV(e);
+  sourceDragStarts.set(e.pointerId, pointerToUV(e));
 }, true);
 canvas.addEventListener('pointerup', (e) => {
+  const start = sourceDragStarts.get(e.pointerId);
   if (CONFIG.SINK_MODE) {
-    if (!sourceDragStart) return;
+    if (!start) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     // Honour the *down* position rather than up, so a tiny finger drift
     // doesn't relocate the marker away from where the user aimed.
     CONFIG.SOURCES.push({
       kind: 'sink',
-      x: sourceDragStart.x, y: sourceDragStart.y,
+      x: start.x, y: start.y,
       rate: 1,
     });
     ui.refreshSources?.();
-    sourceDragStart = null;
+    sourceDragStarts.delete(e.pointerId);
     return;
   }
-  if (!CONFIG.SOURCE_MODE || !sourceDragStart) return;
+  if (!CONFIG.SOURCE_MODE || !start) return;
   e.preventDefault();
   e.stopImmediatePropagation();
   const end = pointerToUV(e);
-  const dx  = end.x - sourceDragStart.x;
-  const dy  = end.y - sourceDragStart.y;
+  const dx  = end.x - start.x;
+  const dy  = end.y - start.y;
   const len = Math.hypot(dx, dy);
   // Default direction (upward) when the user just taps. Drag → vector.
   // Scale: a 0.2-UV drag yields a force comparable to a single splat.
@@ -243,15 +248,20 @@ canvas.addEventListener('pointerup', (e) => {
   else             { vx = dx * 4.5;   vy = dy * 4.5; }
   const color = pickSplatColor(CONFIG.COLOR_MODE || 'rainbow', performance.now() * 0.001);
   CONFIG.SOURCES.push({
-    x: sourceDragStart.x, y: sourceDragStart.y,
+    x: start.x, y: start.y,
     dx: vx, dy: vy, color, rate: 1,
   });
   ui.refreshSources?.();
-  sourceDragStart = null;
+  sourceDragStarts.delete(e.pointerId);
 }, true);
 canvas.addEventListener('pointercancel', (e) => {
   if (!CONFIG.SOURCE_MODE && !CONFIG.SINK_MODE) return;
-  sourceDragStart = null;
+  sourceDragStarts.delete(e.pointerId);
+}, true);
+// Same lostpointercapture cleanup as InputHandler — system-stolen
+// capture (back-gesture, scrollbar) would otherwise leak entries.
+canvas.addEventListener('lostpointercapture', (e) => {
+  sourceDragStarts.delete(e.pointerId);
 }, true);
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -305,6 +315,11 @@ function obstacleDragEnd(_e) {
 canvas.addEventListener('pointerdown',  obstacleDragStart);
 canvas.addEventListener('pointerup',    obstacleDragEnd);
 canvas.addEventListener('pointercancel',obstacleDragEnd);
+// Same lostpointercapture cleanup as the source/sink path: if the OS
+// steals a pointer mid-stroke, treat it as a release so the
+// obstacleActivePointers counter doesn't latch high (which would
+// disable the Undo button forever).
+canvas.addEventListener('lostpointercapture', obstacleDragEnd);
 
 /* ──────────────────────────────────────────────────────────────────────
    5.  UI
