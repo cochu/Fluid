@@ -357,6 +357,14 @@ export class UI {
       if (btn) this._flashTip(btn, this._advectionLabel(next));
     });
 
+    // No-slip / free-slip wall boundary toggle.
+    this._bind('btn-noslip', 'click', () => {
+      cfg.NO_SLIP_BOUNDARY = !cfg.NO_SLIP_BOUNDARY;
+      this._refreshNoSlipButton();
+      const btn = document.getElementById('btn-noslip');
+      if (btn) this._flashTip(btn, this._noSlipLabel(cfg.NO_SLIP_BOUNDARY));
+    });
+
     this._bind('btn-pause', 'click', () => this._setPaused(!cfg.PAUSED));
 
     this._bind('btn-snapshot', 'click', () => this._cb.onSnapshot?.());
@@ -1171,6 +1179,20 @@ export class UI {
     btn.dataset.tip = this._advectionLabel(scheme);
     btn.setAttribute('aria-label', this._advectionLabel(scheme));
   }
+  /** Wall boundary (free-slip ⇌  vs no-slip ⊠). */
+  _noSlipLabel(noSlip) {
+    return noSlip ? 'Wall boundary: no-slip (fluid sticks to edges)'
+                  : 'Wall boundary: free-slip (fluid slides along edges)';
+  }
+  _refreshNoSlipButton() {
+    const btn = document.getElementById('btn-noslip');
+    if (!btn) return;
+    const noSlip = !!this._config.NO_SLIP_BOUNDARY;
+    btn.textContent = noSlip ? '⊠' : '⇌';
+    btn.classList.toggle('active', noSlip);
+    btn.dataset.tip = this._noSlipLabel(noSlip);
+    btn.setAttribute('aria-label', this._noSlipLabel(noSlip));
+  }
   _syncStates() {
     this._toggle('btn-particles', this._config.PARTICLES);
     this._toggle('btn-bloom',     this._config.BLOOM);
@@ -1179,6 +1201,7 @@ export class UI {
     const cBtn = document.getElementById('btn-colorful');
     if (cBtn) cBtn.dataset.tip = COLOR_MODE_LABELS[mode] || mode;
     this._refreshAdvectionButton();
+    this._refreshNoSlipButton();
     this._toggle('btn-pause',     this._config.PAUSED);
     this._toggle('btn-tilt',      this._config.TILT_REACTIVE);
     this._toggle('btn-midi',      this._config.MIDI_REACTIVE);

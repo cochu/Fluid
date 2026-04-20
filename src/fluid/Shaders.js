@@ -362,9 +362,14 @@ void main() {
 /**
  * Free-slip velocity boundary condition (Stam / Harris GPU Gems 1, ch. 38).
  *
- * On the 1-texel boundary ring: read the inner neighbour and write
- * (-vn, vt) — normal component negated, tangential preserved. Interior
- * fragments are passed through unchanged.
+ * On the 1-texel boundary ring we synthesise a ghost-cell value from
+ * the inner neighbour:
+ *   - **free-slip** (uNoSlip = 0): write (-vn, vt) — normal component
+ *     negated so its average with the inner cell is zero (no flux
+ *     through the wall), tangential preserved (the fluid slides).
+ *   - **no-slip**  (uNoSlip = 1): write -inner — both components
+ *     negated so the average with the inner cell is the zero vector
+ *     (the fluid sticks to the wall, viscous drag near the edges).
  *
  * Boundary detection uses integer texel coordinates from gl_FragCoord, which
  * is exact (no float-precision ambiguity). texelFetch reads point-sampled
@@ -374,7 +379,8 @@ export const BOUNDARY_FRAG = /* glsl */`#version 300 es
 precision highp float;
 precision highp sampler2D;
 uniform sampler2D uVelocity;
-uniform ivec2     uSize;   // (width, height) of the velocity grid
+uniform ivec2     uSize;     // (width, height) of the velocity grid
+uniform int       uNoSlip;   // 0 = free-slip (default), 1 = no-slip
 out vec4 fragColor;
 
 void main() {
@@ -399,8 +405,14 @@ void main() {
         clamp(p.y + (bottom ? 1 : (top  ? -1 : 0)), 0, yMax)
     );
     vec4 v = texelFetch(uVelocity, inner, 0);
-    if (left || right) v.x = -v.x;
-    if (bottom || top) v.y = -v.y;
+    if (uNoSlip == 1) {
+        // No-slip: both components negated so cell+ghost average to 0.
+        v.xy = -v.xy;
+    } else {
+        // Free-slip: normal component negated, tangential preserved.
+        if (left || right) v.x = -v.x;
+        if (bottom || top) v.y = -v.y;
+    }
     fragColor = v;
 }
 `;

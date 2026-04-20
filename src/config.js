@@ -50,6 +50,17 @@ export const CONFIG = {
   DYE_ADVECTION: 'maccormack',
 
   /**
+   * Wall boundary condition for the velocity field.
+   *  - false (default): free-slip — fluid slides along the canvas
+   *    edges (normal component negated, tangential preserved).
+   *  - true            : no-slip  — fluid sticks to the edges, creating
+   *    visible boundary-layer drag near the walls. Pairs nicely with
+   *    a non-zero VISCOSITY for a thicker, more viscous look.
+   * Implemented as a single uniform branch in BOUNDARY_FRAG.
+   */
+  NO_SLIP_BOUNDARY: false,
+
+  /**
    * Kinematic viscosity ν. 0 disables the implicit viscous diffusion pass
    * entirely (no cost). Typical visible range is roughly 0–0.5; the value
    * is multiplied by Δt · N² internally so the slider feel is independent

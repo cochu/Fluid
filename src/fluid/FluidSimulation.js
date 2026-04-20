@@ -633,11 +633,12 @@ export class FluidSimulation {
    * writes to velocity.write, swaps.
    */
   _enforceVelocityBoundary() {
-    const { gl } = this;
+    const { gl, config } = this;
     const { program, uniforms } = this._prog.boundary;
     gl.useProgram(program);
     gl.uniform1i(uniforms.uVelocity, this.velocity.read.attach(0));
     gl.uniform2i(uniforms.uSize, this.velocity.width, this.velocity.height);
+    gl.uniform1i(uniforms.uNoSlip, config.NO_SLIP_BOUNDARY ? 1 : 0);
     this._blit(this.velocity.write.fbo, this.velocity.write.width, this.velocity.write.height);
     this.velocity.swap();
   }
