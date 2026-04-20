@@ -74,15 +74,17 @@ function persistenceFromSlider(t) {
 /**
  * Obstacle brush slider 0..100 → OBSTACLE_PAINT_RADIUS (UV fraction of
  * the shorter screen side).
- *   - 0   → 0.005  (single-pixel pen)
- *   - 35  → ~0.017 (current visual default — see config.js comment)
- *   - 100 → 0.10   (broad swath, ~1/10 of canvas)
+ *   - 0   → 0.0005 (sub-pixel pen — surgical edits)
+ *   - 35  → ~0.0053 (current visual default — fine line)
+ *   - 100 → 0.04   (broad swath, ~1/25 of canvas)
  * Quadratic so fine sizes near 0 are easy to dial in while still
- * reaching a fat brush at the top.
+ * reaching a fat brush at the top. Range tuned down (×0.1 at min,
+ * ×0.4 at max vs. the original mapping) so the brush stays usable on
+ * every screen size — the previous max swallowed a tenth of the canvas.
  */
 function brushFromSlider(t) {
   const u = Math.max(0, Math.min(1, t / 100));
-  return 0.005 + 0.095 * u * u;
+  return 0.0005 + 0.0395 * u * u;
 }
 
 /**

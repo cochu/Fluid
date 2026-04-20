@@ -292,8 +292,12 @@ export const CONFIG = {
   /* ── Obstacles ───────────────────────────────────────────────────── */
   /** Master enable for the obstacle-paint pointer mode. Toggled by 🧱. */
   OBSTACLE_MODE: false,
-  /** Gaussian radius (UV-fraction-of-shorter-side) of the obstacle brush. */
-  OBSTACLE_PAINT_RADIUS: 0.0035,
+  /**
+   * Gaussian radius (UV-fraction-of-shorter-side) of the obstacle brush.
+   * Matches `brushFromSlider(35)` in UI.js so the very first painted dab
+   * (before the user touches the slider) lines up with the slider knob.
+   */
+  OBSTACLE_PAINT_RADIUS: 0.0053,
 
   /* ── Permanent fluid sources ─────────────────────────────────────── */
   /**

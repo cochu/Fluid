@@ -262,6 +262,13 @@ html, body {
   /* Sliders need a bit more breathing room than icon rows. */
   padding-top: 2px;
 }
+/* The HTML `hidden` attribute defaults to `display:none` in the UA stylesheet,
+   but `.ui-more-row { display:flex }` above wins on specificity. The brush row
+   piggy-backs on `.ui-more-row` for layout yet must stay hidden until obstacle
+   mode is on, so re-assert the hide here. */
+.ui-more-row[hidden] {
+  display: none;
+}
 
 /* Trigger active-state indicator: a small dot in the top-right corner
    when any control inside #more-panel is currently in an "on" mode
