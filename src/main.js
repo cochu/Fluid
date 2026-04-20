@@ -14,7 +14,7 @@ import { getWebGL2Context } from './webgl/GLUtils.js';
 import { FluidSimulation }  from './fluid/FluidSimulation.js';
 import { ParticleSystem }   from './particles/ParticleSystem.js';
 import { InputHandler }     from './input/InputHandler.js';
-import { UI }               from './ui/UI.js';
+import { UI, dragLengthToT, tToSinkRate, TAP_DRAG_UV } from './ui/UI.js';
 import { AudioReactivity }  from './audio/AudioReactivity.js';
 import { MidiInput }        from './input/MidiInput.js';
 import { AccelerometerInput } from './input/AccelerometerInput.js';
@@ -210,13 +210,31 @@ canvas.addEventListener('pointerdown', (e) => {
     // sinks.
     e.preventDefault();
     e.stopImmediatePropagation();
-    sourceDragStarts.set(e.pointerId, pointerToUV(e));
+    const start = pointerToUV(e);
+    sourceDragStarts.set(e.pointerId, start);
+    ui?.showPlacementPreview?.({ kind: 'sink', startUV: start, currentUV: start });
     return;
   }
   if (!CONFIG.SOURCE_MODE) return;
   e.preventDefault();
   e.stopImmediatePropagation();
-  sourceDragStarts.set(e.pointerId, pointerToUV(e));
+  const start = pointerToUV(e);
+  sourceDragStarts.set(e.pointerId, start);
+  ui?.showPlacementPreview?.({ kind: 'source', startUV: start, currentUV: start });
+}, true);
+canvas.addEventListener('pointermove', (e) => {
+  // Live drag preview — only in source/sink mode and only while a
+  // pointer is actively being placed (start map keys on pointerId).
+  if (!CONFIG.SOURCE_MODE && !CONFIG.SINK_MODE) return;
+  const start = sourceDragStarts.get(e.pointerId);
+  if (!start) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  ui?.showPlacementPreview?.({
+    kind: CONFIG.SINK_MODE ? 'sink' : 'source',
+    startUV:   start,
+    currentUV: pointerToUV(e),
+  });
 }, true);
 canvas.addEventListener('pointerup', (e) => {
   const start = sourceDragStarts.get(e.pointerId);
@@ -225,13 +243,29 @@ canvas.addEventListener('pointerup', (e) => {
     e.preventDefault();
     e.stopImmediatePropagation();
     // Honour the *down* position rather than up, so a tiny finger drift
-    // doesn't relocate the marker away from where the user aimed.
+    // doesn't relocate the marker away from where the user aimed. The
+    // drag length, however, dials the drain rate: a short tap keeps
+    // the legacy rate=1; a longer drag warms up the marker and pulls
+    // dye out faster (capped to SINK_RATE_MAX so the sink stays
+    // legible as a "drain" rather than an instantaneous erase).
+    const end = pointerToUV(e);
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    const dxScreen = (end.x - start.x) * w;
+    const dyScreen = (end.y - start.y) * h;
+    const screenLen = Math.hypot(dxScreen, dyScreen);
+    const dragUV = Math.hypot(end.x - start.x, end.y - start.y);
+    let rate = 1;
+    if (dragUV >= TAP_DRAG_UV) {
+      rate = tToSinkRate(dragLengthToT(screenLen, w, h));
+    }
     CONFIG.SOURCES.push({
       kind: 'sink',
       x: start.x, y: start.y,
-      rate: 1,
+      rate,
     });
     ui.refreshSources?.();
+    ui?.clearPlacementPreview?.();
     sourceDragStarts.delete(e.pointerId);
     return;
   }
@@ -245,24 +279,27 @@ canvas.addEventListener('pointerup', (e) => {
   // Default direction (upward) when the user just taps. Drag → vector.
   // Scale: a 0.2-UV drag yields a force comparable to a single splat.
   let vx, vy;
-  if (len < 0.015) { vx = 0;          vy = 0.45; }
-  else             { vx = dx * 4.5;   vy = dy * 4.5; }
+  if (len < TAP_DRAG_UV) { vx = 0;          vy = 0.45; }
+  else                   { vx = dx * 4.5;   vy = dy * 4.5; }
   const color = pickSplatColor(CONFIG.COLOR_MODE || 'rainbow', performance.now() * 0.001);
   CONFIG.SOURCES.push({
     x: start.x, y: start.y,
     dx: vx, dy: vy, color, rate: 1,
   });
   ui.refreshSources?.();
+  ui?.clearPlacementPreview?.();
   sourceDragStarts.delete(e.pointerId);
 }, true);
 canvas.addEventListener('pointercancel', (e) => {
   if (!CONFIG.SOURCE_MODE && !CONFIG.SINK_MODE) return;
   sourceDragStarts.delete(e.pointerId);
+  ui?.clearPlacementPreview?.();
 }, true);
 // Same lostpointercapture cleanup as InputHandler — system-stolen
 // capture (back-gesture, scrollbar) would otherwise leak entries.
 canvas.addEventListener('lostpointercapture', (e) => {
   sourceDragStarts.delete(e.pointerId);
+  ui?.clearPlacementPreview?.();
 }, true);
 
 /* ──────────────────────────────────────────────────────────────────────

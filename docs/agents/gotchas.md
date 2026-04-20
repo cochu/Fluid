@@ -223,3 +223,37 @@ Each entry: symptom → root cause → fix → why it matters.
   errors fire during boot. **Run it on every PR that touches `main.js`
   or any of its imports.** It is the only test in the harness that
   actually evaluates the bootstrap module.
+
+---
+
+## 14. Source arrows pointed a few degrees off the user's drag
+
+- **Symptom:** The arrow on a placed source visibly tilted away from
+  the direction the user just dragged on screen — typically by 5–15°
+  on landscape laptops, and worse the further the canvas departed
+  from a square aspect ratio. The fluid itself moved in the *correct*
+  screen direction, so the bug was purely in the SVG overlay feedback,
+  but it broke trust in the source-placement UI.
+- **Root cause:** `UI._renderSources` normalised the arrow direction
+  using the stored `(s.dx, s.dy)` directly. Those are **UV velocities**
+  (units of canvas-fraction per second). On a 16:9 canvas a UV vector
+  `(0.1, -0.1)` covers `(160 px, 40 px)` on screen, so the screen angle
+  is `atan2(-40, 160) ≈ −14°`, not `−45°` as a unit-UV vector would
+  suggest.
+- **Fix in place:** The renderer now multiplies the UV velocity by the
+  canvas `(W, H)` dimensions (with the `y` flip baked in: SVG y grows
+  downward, fluid `y` grows upward) **before** normalising for the
+  arrow direction. The arrow now follows the user's drag exactly on
+  any aspect ratio. Magnitude rendering (arrow length + colour gauge)
+  is decoupled from direction and uses `sourceMagnitudeToT` on the
+  raw UV magnitude.
+- **What NOT to do:** Don't store the screen-space vector instead — it
+  would invalidate every persisted snapshot and break sources that were
+  placed on a different aspect ratio than the one being viewed. Always
+  store in UV; convert to screen at render time.
+- **Regression net:** `tests/test.js` `sources / _renderSources arrow
+  direction is in screen space (aspect-ratio-correct)` builds a
+  1600×400 mock canvas, pushes a source whose UV-space angle differs
+  sharply from its screen-space angle, and asserts the rendered
+  arrow lands within 3° of the screen-space target. The old UV
+  normaliser would fail this test by ~30°.
