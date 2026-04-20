@@ -57,6 +57,9 @@ export const PERSISTED_CONFIG_KEYS = Object.freeze([
   'AUDIO_MIDS_SENSITIVITY',
   'AUDIO_HIGHS_SENSITIVITY',
   'AUDIO_DEVICE_ID',
+  'MIDI_CHANNEL_FILTER',
+  'MIDI_NOTE_GAIN',
+  'MIDI_CC_MAP',
 ]);
 
 /** Slider DOM ids whose `value` (0..100) is persisted alongside CONFIG so
@@ -119,6 +122,21 @@ export function applyToConfig(snap) {
     // Cheap type guard against tampered input.
     if (k === 'SOURCES') {
       if (Array.isArray(v)) CONFIG.SOURCES = sanitiseSources(v);
+      continue;
+    }
+    if (k === 'MIDI_CC_MAP') {
+      // Plain-object guard: reject arrays, null, and entries whose key
+      // isn't a numeric CC (0..127) or whose value isn't a known target.
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const sanitised = {};
+        for (const cc of Object.keys(v)) {
+          const ccNum = Number(cc);
+          if (!Number.isInteger(ccNum) || ccNum < 0 || ccNum > 127) continue;
+          if (typeof v[cc] !== 'string') continue;
+          sanitised[ccNum] = v[cc];
+        }
+        CONFIG.MIDI_CC_MAP = sanitised;
+      }
       continue;
     }
     if (typeof CONFIG[k] === typeof v || CONFIG[k] === undefined) {

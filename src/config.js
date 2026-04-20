@@ -207,6 +207,29 @@ export const CONFIG = {
    *  symmetry; fewer aliases into × / diamond patterns). */
   AUDIO_SPLAT_COUNT: 8,
 
+  /* ── MIDI input ───────────────────────────────────────────────────── */
+  /** Master enable for MIDI reactivity. NOT persisted — the underlying
+   *  Web MIDI permission must be re-requested from a user gesture each
+   *  reload (mirrors AUDIO_REACTIVE / TILT_REACTIVE). */
+  MIDI_REACTIVE: false,
+
+  /** Channel filter for incoming MIDI messages. -1 = listen to all
+   *  channels; 0..15 = restrict to a single channel. Dev-tier: there is
+   *  no v1 UI for this, but a power-user can set it from devtools. */
+  MIDI_CHANNEL_FILTER: -1,
+
+  /** Multiplier on velocity → splat force. 1.0 leaves the velocity
+   *  curve untouched; lower values make the keyboard "softer". */
+  MIDI_NOTE_GAIN: 1.0,
+
+  /** Live-mutable map of {ccNumber: 'CONFIG_KEY_NAME'} pairs. The MIDI
+   *  module looks up the target key on every CC and remaps the value
+   *  through a target-specific curve. Defaults: modwheel → SPLAT_FORCE,
+   *  filter cutoff → CURL. Add entries from devtools to map more
+   *  controllers (recognised targets: SPLAT_FORCE, CURL,
+   *  DENSITY_DISSIPATION, VISCOSITY). */
+  MIDI_CC_MAP: { 1: 'SPLAT_FORCE', 74: 'CURL' },
+
   /* ── Tilt / accelerometer reactivity ─────────────────────────────── */
   /**
    * Master enable for accelerometer-driven stirring. OFF by default —

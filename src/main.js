@@ -16,6 +16,7 @@ import { ParticleSystem }   from './particles/ParticleSystem.js';
 import { InputHandler }     from './input/InputHandler.js';
 import { UI }               from './ui/UI.js';
 import { AudioReactivity }  from './audio/AudioReactivity.js';
+import { MidiInput }        from './input/MidiInput.js';
 import { AccelerometerInput } from './input/AccelerometerInput.js';
 import { pickSplatColor }   from './input/Palettes.js';
 import { BUILD_VERSION }    from './version.js';
@@ -354,6 +355,14 @@ const ui = new UI(CONFIG, {
     tilt.stop();
     return false;
   },
+  async onToggleMidi(want) {
+    if (want) {
+      try { await midi.start(); return true; }
+      catch (err) { throw err; }
+    }
+    midi.stop();
+    return false;
+  },
   onColorModeChange(_mode) { /* nothing to rebuild — splat callers re-read CONFIG */ },
   onClearObstacles() {
     fluid.clearObstacles();
@@ -451,6 +460,7 @@ function doSnapshot() {
 
 const audio = new AudioReactivity(handleSplat, CONFIG);
 const tilt  = new AccelerometerInput(handleSplat, CONFIG);
+const midi  = new MidiInput(handleSplat, CONFIG);
 
 /* ──────────────────────────────────────────────────────────────────────
    6.  Automatic random splats (seed the simulation on first load)
@@ -581,6 +591,7 @@ function animate(now) {
   // burst of splats from the canvas centre on detected bass beats.
   audio.tick(now);
   tilt.tick(now);
+  midi.tick(now);  // no-op (event-driven), kept for loop uniformity
 
   // ── Tilt body force ───────────────────────────────────────────────
   // The tilt module exposes a UV/s² vector; apply it as a uniform force

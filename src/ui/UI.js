@@ -351,6 +351,7 @@ export class UI {
     this._bind('btn-snapshot', 'click', () => this._cb.onSnapshot?.());
 
     this._bindAudioButton();
+    this._bindMidiButton();
     this._bindTiltButton();
     this._bindSpawnButton();
     this._bindObstacleButtons();
@@ -848,6 +849,38 @@ export class UI {
   }
 
   /* ──────────────────────────────────────────────────────────────────
+     MIDI input (asynchronous — needs Web MIDI permission)
+     ────────────────────────────────────────────────────────────────── */
+
+  _bindMidiButton() {
+    const btn = document.getElementById('btn-midi');
+    if (!btn) return;
+    let busy = false;
+    btn.addEventListener('click', async () => {
+      if (busy) return;
+      busy = true;
+      // Reuse the audio-denied red-tint style so we don't ship a
+      // duplicate CSS rule for an identical visual state.
+      btn.classList.remove('audio-denied');
+      const want = !this._config.MIDI_REACTIVE;
+      try {
+        const actual = await this._cb.onToggleMidi?.(want);
+        const on     = actual === undefined ? want : !!actual;
+        this._config.MIDI_REACTIVE = on;
+        this._toggle('btn-midi', on);
+      } catch (err) {
+        this._config.MIDI_REACTIVE = false;
+        this._toggle('btn-midi', false);
+        btn.classList.add('audio-denied');
+        btn.dataset.tip = `MIDI unavailable: ${err?.message || 'permission denied'}`;
+        console.warn('[Fluid] MIDI input unavailable:', err);
+      } finally {
+        busy = false;
+      }
+    });
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
      Drop-particles button (drag-and-drop onto the canvas)
      ────────────────────────────────────────────────────────────────── */
 
@@ -979,6 +1012,7 @@ export class UI {
     this._toggle('btn-hq-advect', this._config.HIGH_QUALITY_ADVECTION);
     this._toggle('btn-pause',     this._config.PAUSED);
     this._toggle('btn-tilt',      this._config.TILT_REACTIVE);
+    this._toggle('btn-midi',      this._config.MIDI_REACTIVE);
     this._toggle('btn-obstacles', this._config.OBSTACLE_MODE);
     this._toggle('btn-source',    this._config.SOURCE_MODE);
     this._toggle('btn-erase',     this._config.OBSTACLE_ERASE);

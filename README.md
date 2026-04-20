@@ -186,6 +186,7 @@ network disabled — the simulation will start exactly the same way.
 | **✺** | Toggle bloom post-process |
 | **◐** | Cycle hue palette (rainbow / cycle / ocean / sunset / magma / forest / mono) |
 | **🎤** | Toggle **audio reactivity** — bass beats from the microphone produce expanding speaker-like rings |
+| **🎹** | Toggle **MIDI input** — connect a keyboard to play splats by note pitch (chromatic spiral); modwheel & CC controls couple to force / curl / persistence / viscosity in real time |
 | **🧭** | Toggle **tilt reactivity** — phone tilt drifts the fluid (mobile, asks motion permission) |
 | **🧱** | Paint obstacle mode — drag on the canvas to paint walls that deflect the fluid |
 | **🧽** | Clear painted obstacles |
@@ -261,22 +262,20 @@ Shipped:
 - [x] **PWA** manifest + offline support *(see "Progressive Web App" section)*
 - [x] **Color presets** — 7 palettes cycled by the ◐ button (rainbow, cycle, ocean, sunset, magma, forest, mono)
 - [x] **Viscosity control** — cubic-curve slider exposed in the UI
-- [x] **Obstacles** — paint walls with 🧱, clear with 🧽; the velocity field reads them as solid cells
+- [x] **Obstacles** — paint walls with 🧱, clear with 🧽; undo with ↶; eraser mode with 🩹; variable brush size
 - [x] **Permanent sources** — place persistent emitters with 💠 (drag = direction, tap a marker to remove)
 - [x] **Tilt reactivity** — 🧭 stirs the fluid from the device accelerometer (with iOS motion-permission flow)
 - [x] **PNG snapshot** — 📷 saves the live frame as a PNG named with the build SHA
 - [x] **High-quality dye advection** — MacCormack toggle (≈) on the dye field only
+- [x] **Settings persistence & shareable URLs** — restore last-used config across reloads, deep-link a configured scene
+- [x] **Named scene presets** — Aurora, Ink, Lava, Smoke, … (combinations of palette + viscosity + bloom + vorticity)
+- [x] **Wallpaper mode** — UI-hidden screensaver with gentle auto-splats (🌙 button)
+- [x] **MIDI input** — 🎹 Web MIDI controller mapping (notes → chromatic spiral splats, CC → live tunables)
 
 In progress / planned:
 
 - [ ] **Animated export** — WebM / GIF capture for short loops (PNG snapshot is already shipped)
 - [ ] **WebGPU** migration *(see [`docs/webgpu-rnd.md`](docs/webgpu-rnd.md) — R&D notes; capability is probed at startup, full port pending)*
-- [ ] **Settings persistence & shareable URLs** — restore last-used config across reloads, deep-link a configured scene
-- [ ] **Named scene presets** — Aurora, Ink, Lava, Smoke, … (combinations of palette + viscosity + bloom + vorticity)
-- [ ] **Wallpaper mode** — UI-hidden screensaver with gentle auto-splats
-- [ ] **Obstacle brushes** — variable size, eraser, undo
 - [ ] **Painted sinks** — counterpart to sources, drain dye + velocity
-- [ ] **MIDI input** — Web MIDI controller mapping (notes → splats, CC → live tunables)
 - [ ] **Volumetric / faux-3D dye shading** — wire the dormant `CONFIG.SHADING` path into the display shader
-- [ ] **Adaptive auto-tune with recovery** — climb the resolution back up when frame budget loosens
 - [ ] **Visual non-regression harness** — scripted scenarios + deterministic frame hashes
