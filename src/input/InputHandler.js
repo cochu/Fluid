@@ -8,7 +8,16 @@
  *   - current   position (UV [0,1])
  *   - previous  position (UV [0,1])
  *   - delta     (UV/s velocity)
- *   - colour    (assigned once per pointer-down)
+ *   - colour    (assigned once per pointer-down; persists for the
+ *                lifetime of the drag even if COLOR_MODE changes
+ *                mid-stroke — each stroke is treated as one painterly
+ *                gesture rather than a sequence of independent splats)
+ *
+ * Concurrency model: each pointerId has an independent state entry in
+ * `_pointers`. A `lostpointercapture` listener evicts stale entries
+ * when the system steals capture (browser back-gesture, scrollbar
+ * drag, modal popping above the canvas) so `activePointerCount` stays
+ * accurate.
  */
 
 import { CONFIG } from '../config.js';
@@ -42,6 +51,12 @@ export class InputHandler {
     c.addEventListener('pointermove',  this._onMove.bind(this),  { passive: false });
     c.addEventListener('pointerup',    this._onUp.bind(this),    { passive: false });
     c.addEventListener('pointercancel',this._onUp.bind(this),    { passive: false });
+    // Stale-state guard: when the OS or browser steals pointer capture
+    // (back-swipe gesture, scrollbar grab, alert popping above the
+    // canvas) the next pointermove never arrives but pointerup also
+    // doesn't fire. Without this listener `_pointers` would leak the
+    // entry and `activePointerCount` would drift over time.
+    c.addEventListener('lostpointercapture', this._onUp.bind(this));
 
     // Prevent default browser scroll / zoom on the canvas
     c.addEventListener('touchstart',   e => e.preventDefault(), { passive: false });
@@ -52,8 +67,14 @@ export class InputHandler {
     e.preventDefault();
     this._canvas.setPointerCapture(e.pointerId);
 
-    const uv    = this._toUV(e);
-    const color = pickSplatColor(this._config.COLOR_MODE || 'rainbow', performance.now() * 0.001);
+    const uv = this._toUV(e);
+    // Per-pointer hue offset: pickSplatColor is deterministic in the
+    // time argument, so two simultaneous taps would otherwise pick the
+    // same hue. Adding a slot-based offset (0.137·N — golden-ratio-ish
+    // step around the colour wheel) keeps multi-touch visibly distinct.
+    const slot = this._pointers.size;
+    const tSec = performance.now() * 0.001 + slot * 0.137;
+    const color = pickSplatColor(this._config.COLOR_MODE || 'rainbow', tSec);
 
     this._pointers.set(e.pointerId, {
       uv,

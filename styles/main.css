@@ -128,6 +128,16 @@ html, body {
   box-shadow: none;
 }
 
+/* Disabled buttons (e.g. ↶ Undo when the obstacle stack is empty or
+   while a drag is in progress). Greyed visually + cursor-not-allowed
+   so the affordance is read as "not available right now". */
+.ui-btn:disabled,
+.ui-btn.is-disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* Drag-source button (drop particles) — animated affordance so users
    discover the drag interaction without needing a written instruction. */
 .ui-btn-drag {
@@ -198,6 +208,67 @@ html, body {
   cursor: pointer;
   accent-color: rgba(255, 255, 255, 0.8);
   -webkit-tap-highlight-color: transparent;
+}
+
+/* ============================================================
+   Sub-panels (audio, future panels)
+   ============================================================ */
+.ui-subpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  margin-left: 2px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 8px;
+  min-width: 168px;
+}
+
+.ui-subpanel[hidden] { display: none; }
+
+.ui-subpanel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ui-subpanel-row label {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 10px;
+  font-family: system-ui, -apple-system, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  width: 36px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.ui-subpanel-row input[type="range"] {
+  flex: 1;
+  height: 4px;
+  cursor: pointer;
+  accent-color: rgba(255, 255, 255, 0.8);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ui-subpanel-row select {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  min-height: 32px;
+  font-family: system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+  max-width: 120px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ui-subpanel-row select:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 /* ============================================================
@@ -355,4 +426,143 @@ html, body {
   letter-spacing: 0.10em;
   text-transform: uppercase;
   pointer-events: none;
+}
+
+/* ============================================================
+   Wallpaper / screensaver mode
+   --------------------------------------------------------------
+   Toggled by the 🌙 button. When `body.wallpaper-on` is set, all
+   chrome (panel, FPS, version tag, source overlay) fades to zero
+   opacity over ~900 ms unless `body.wallpaper-revealed` is also
+   set — that class is added by the UI on pointermove / keydown
+   and removed after WALLPAPER_FADE_TIMEOUT_MS of inactivity.
+   The 🌙 button itself stays at full opacity so the user can
+   always tap it to leave wallpaper mode (Marcus's reversibility
+   requirement). pointer-events stay live so any tap hits the
+   button — only the visual chrome fades.
+   ============================================================ */
+body.wallpaper-on #ui-panel,
+body.wallpaper-on #fps-counter,
+body.wallpaper-on #version-tag,
+body.wallpaper-on #sources-overlay {
+  opacity: 0;
+  transition: opacity 900ms ease-out;
+}
+/* Disable pointer events on the (invisible) sources overlay while
+   chrome is faded so an unsuspecting tap on the canvas can't land on
+   an invisible source-marker hit-target. The inner `g.src` opts back
+   in via the bubbled rule below once the chrome is revealed. */
+body.wallpaper-on:not(.wallpaper-revealed) #sources-overlay g.src {
+  pointer-events: none;
+}
+body.wallpaper-on.wallpaper-revealed #ui-panel,
+body.wallpaper-on.wallpaper-revealed #fps-counter,
+body.wallpaper-on.wallpaper-revealed #version-tag,
+body.wallpaper-on.wallpaper-revealed #sources-overlay {
+  opacity: 1;
+  transition: opacity 200ms ease-in;
+}
+/* The wallpaper toggle itself remains visible even when the rest
+   of the panel fades, so the user always has an exit affordance. */
+body.wallpaper-on #btn-wallpaper {
+  opacity: 1 !important;
+}
+body.wallpaper-on #btn-wallpaper.active {
+  /* Subtle moonlit glow so the lone visible button reads as the
+     active mode toggle, not just a stray emoji on a black canvas. */
+  box-shadow: 0 0 18px rgba(170, 220, 255, 0.35);
+}
+
+/* ============================================================
+   Tilt onboarding modal (iOS first-tap gesture-chain bridge)
+   ============================================================ */
+#tilt-tutorial {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 1000;
+  opacity: 0;
+  transition: opacity 180ms ease-out;
+  pointer-events: none;
+}
+#tilt-tutorial[hidden] { display: none; }
+#tilt-tutorial.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tilt-tutorial-card {
+  background: rgba(20, 22, 28, 0.96);
+  color: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  padding: 22px 24px 18px;
+  max-width: 320px;
+  width: calc(100% - 48px);
+  font-family: system-ui, -apple-system, sans-serif;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  text-align: left;
+}
+
+.tilt-tutorial-card h2 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.tilt-tutorial-card p {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.tilt-tutorial-note {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.tilt-tutorial-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  justify-content: flex-end;
+}
+
+.tilt-tutorial-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 10px 18px;
+  min-height: 44px;
+  min-width: 84px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tilt-tutorial-btn-secondary {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.tilt-tutorial-btn-secondary:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tilt-tutorial-btn-primary {
+  background: rgba(120, 180, 255, 0.92);
+  color: #08111d;
+  font-weight: 600;
+}
+.tilt-tutorial-btn-primary:active {
+  background: rgba(95, 160, 240, 1);
 }

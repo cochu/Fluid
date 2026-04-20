@@ -34,8 +34,41 @@ export const CONFIG = {
    * Use second-order MacCormack/Selle advection (3-pass, with limiter)
    * instead of plain semi-Lagrangian. Significantly reduces numerical
    * diffusion at the cost of two extra advection passes per advected field.
+   *
+   * Kept as a backward-compat boolean alias of `DYE_ADVECTION === 'maccormack'`
+   * for old persisted snapshots; new code should read DYE_ADVECTION instead.
    */
   HIGH_QUALITY_ADVECTION: true,
+
+  /**
+   * Dye advection scheme — one of 'standard', 'maccormack', 'bfecc'.
+   * Velocity self-advection is always plain semi-Lagrangian (golden
+   * rule #1: MacCormack on the velocity path re-creates the
+   * zero-viscosity grid trame). BFECC and MacCormack share the first
+   * two passes, so the GPU cost is identical between them.
+   */
+  DYE_ADVECTION: 'maccormack',
+
+  /**
+   * Wall boundary condition for the velocity field.
+   *  - false (default): free-slip — fluid slides along the canvas
+   *    edges (normal component negated, tangential preserved).
+   *  - true            : no-slip  — fluid sticks to the edges, creating
+   *    visible boundary-layer drag near the walls. Pairs nicely with
+   *    a non-zero VISCOSITY for a thicker, more viscous look.
+   * Implemented as a single uniform branch in BOUNDARY_FRAG.
+   */
+  NO_SLIP_BOUNDARY: false,
+
+  /**
+   * Faux-3D dye shading. When true, the display shader treats dye
+   * luminance as a height field, computes a screen-space normal from
+   * the local gradient, and lights it with a fixed virtual sun
+   * (Lambert + tight specular). Purely cosmetic — does not touch the
+   * simulation. Off by default because the flat look is already part
+   * of the project's identity; the user opts in via the ✦ button.
+   */
+  SHADING: false,
 
   /**
    * Kinematic viscosity ν. 0 disables the implicit viscous diffusion pass
@@ -123,6 +156,38 @@ export const CONFIG = {
   /** How often (seconds) to re-evaluate whether adaptive resolution should trigger. */
   ADAPTIVE_RESOLUTION_CHECK_INTERVAL: 2,
 
+  /** Number of consecutive bad-frame check windows required before an
+   *  adaptive downscale fires. Two windows (~4 s with the default
+   *  CHECK_INTERVAL) filters out a single hiccup such as a GC pause or
+   *  tab refresh — gotcha #8. */
+  ADAPTIVE_DOWNSCALE_CONSECUTIVE: 2,
+
+  /** Average frame time below which adaptive recovery considers
+   *  upscaling. Set to a clear margin under the downscale threshold so
+   *  the system doesn't ping-pong: the gap between this and
+   *  ADAPTIVE_RESOLUTION_THRESHOLD_MS is the hysteresis band. Default
+   *  ~13 ms ≈ 0.6 × the 22 ms downscale gate. */
+  ADAPTIVE_UPSCALE_THRESHOLD_MS: 13,
+
+  /** Number of consecutive good-frame check windows required before an
+   *  adaptive upscale fires. Higher than DOWNSCALE_CONSECUTIVE because
+   *  recovery is the riskier transition (a sudden doubling can blow
+   *  the budget itself); 4 windows ≈ 8 s of clean frames. */
+  ADAPTIVE_UPSCALE_CONSECUTIVE: 4,
+
+  /** Cool-down (ms) after a downscale before another adaptive decision
+   *  can fire — gives the smaller grid time to settle the EMA. */
+  ADAPTIVE_COOLDOWN_AFTER_DOWNSCALE_MS: 3000,
+
+  /** Cool-down (ms) after an upscale. Longer than the downscale path
+   *  because doubling resolution is the riskier transition. */
+  ADAPTIVE_COOLDOWN_AFTER_UPSCALE_MS: 5000,
+
+  /** Master kill-switch for adaptive resolution. The bench harness
+   *  flips this true before instantiation so its measurements aren't
+   *  contaminated by mid-run resolution changes. */
+  ADAPTIVE_RESOLUTION_DISABLED: false,
+
   /** Dimming factor applied to splat colours so they blend well in the fluid. */
   DYE_BRIGHTNESS: 0.15,
 
@@ -132,6 +197,12 @@ export const CONFIG = {
    * 🎤 UI button; the AudioReactivity module is a no-op when this is off.
    */
   AUDIO_REACTIVE: false,
+
+  /** Persisted MediaDeviceInfo.deviceId for the preferred microphone.
+   *  Empty string = use the browser's default device. The id is stable
+   *  per-(browser,origin) so this survives reloads but doesn't cross
+   *  devices. Populated by the device picker in the audio sub-panel. */
+  AUDIO_DEVICE_ID: '',
 
   /** Bass band (Hz). 60–160 trims 50/60 Hz mains hum and stays on the
    *  body of a kick drum. Drives soft converging ring. */
@@ -168,6 +239,29 @@ export const CONFIG = {
   /** Number of splats per bass ring (8 = clean approximation of radial
    *  symmetry; fewer aliases into × / diamond patterns). */
   AUDIO_SPLAT_COUNT: 8,
+
+  /* ── MIDI input ───────────────────────────────────────────────────── */
+  /** Master enable for MIDI reactivity. NOT persisted — the underlying
+   *  Web MIDI permission must be re-requested from a user gesture each
+   *  reload (mirrors AUDIO_REACTIVE / TILT_REACTIVE). */
+  MIDI_REACTIVE: false,
+
+  /** Channel filter for incoming MIDI messages. -1 = listen to all
+   *  channels; 0..15 = restrict to a single channel. Dev-tier: there is
+   *  no v1 UI for this, but a power-user can set it from devtools. */
+  MIDI_CHANNEL_FILTER: -1,
+
+  /** Multiplier on velocity → splat force. 1.0 leaves the velocity
+   *  curve untouched; lower values make the keyboard "softer". */
+  MIDI_NOTE_GAIN: 1.0,
+
+  /** Live-mutable map of {ccNumber: 'CONFIG_KEY_NAME'} pairs. The MIDI
+   *  module looks up the target key on every CC and remaps the value
+   *  through a target-specific curve. Defaults: modwheel → SPLAT_FORCE,
+   *  filter cutoff → CURL. Add entries from devtools to map more
+   *  controllers (recognised targets: SPLAT_FORCE, CURL,
+   *  DENSITY_DISSIPATION, VISCOSITY). */
+  MIDI_CC_MAP: { 1: 'SPLAT_FORCE', 74: 'CURL' },
 
   /* ── Tilt / accelerometer reactivity ─────────────────────────────── */
   /**
@@ -211,4 +305,53 @@ export const CONFIG = {
   SOURCES: [],
   /** Master enable for the source-placement pointer mode. Toggled by 💠. */
   SOURCE_MODE: false,
+
+  /** Master enable for the sink-placement pointer mode. Toggled by 🕳.
+   *  Mutex with SOURCE_MODE and OBSTACLE_MODE — only one editing mode
+   *  is active at a time. A "sink" is a SOURCES entry with `kind:'sink'`
+   *  (no dx/dy/color) that drains dye from a Gaussian neighbourhood
+   *  each frame. Not persisted — placement mode is transient. */
+  SINK_MODE: false,
+
+  /** Per-frame fraction of dye drained at the centre of each sink, in
+   *  units of "fraction-removed/sec at peak". 1.5 corresponds to ~78%
+   *  drained over a second at the bull's-eye of an undisturbed sink —
+   *  a visible drain that lets transient brush-overs survive a moment
+   *  before fading. Multiplied by `dt` and `rate` per frame so behaviour
+   *  is frame-rate independent. */
+  SINK_RATE: 1.5,
+
+  /**
+   * When true *and* OBSTACLE_MODE is also true, drags subtract from the
+   * obstacle field (eraser) instead of adding. Toggled by 🩹. Not
+   * persisted — eraser is a transient editing mode, not a scene
+   * property.
+   */
+  OBSTACLE_ERASE: false,
+
+  /**
+   * User-explicit performance mode. Distinct from the live SIM_RESOLUTION
+   * (which adaptive downscale also rewrites): this captures the user's
+   * intent so persistence can restore the perf-mode preset on reload
+   * without freezing a transient adaptive state. Toggled by ⚡.
+   */
+  PERF_MODE: false,
+
+  /* ── Wallpaper / screensaver mode ─────────────────────────────────── */
+  /**
+   * Toggled by 🌙. When true, the UI panel + version tag + FPS counter
+   * fade out after WALLPAPER_FADE_TIMEOUT_MS of no pointer/keyboard
+   * activity (CSS-driven via the `.wallpaper-on`/`.wallpaper-revealed`
+   * body classes), and the animate loop emits one soft auto-splat every
+   * WALLPAPER_AUTOSPLAT_INTERVAL_MS so the canvas keeps breathing.
+   * Both pause (CONFIG.PAUSED) and tab-hide (document.hidden) gate the
+   * auto-splat naturally because animate() returns early in those
+   * states — no separate timer to leak (gotcha #11).
+   */
+  WALLPAPER_MODE: false,
+  WALLPAPER_AUTOSPLAT_INTERVAL_MS: 1800,
+  WALLPAPER_FADE_TIMEOUT_MS: 5000,
+  /** Force scale applied to wallpaper auto-splats relative to a normal
+   *  user splat (lower = gentler ambient cadence). */
+  WALLPAPER_AUTOSPLAT_FORCE_SCALE: 0.4,
 };

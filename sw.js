@@ -21,7 +21,7 @@
  * GitHub Pages project sites).
  */
 
-const CACHE_VERSION = 'fluid-v1';
+const CACHE_VERSION = 'fluid-v2';
 
 const APP_SHELL = [
   './',
@@ -38,6 +38,7 @@ const APP_SHELL = [
   './src/input/InputHandler.js',
   './src/ui/UI.js',
   './src/audio/AudioReactivity.js',
+  './src/recording/Recorder.js',
 ];
 
 /* ──────────────────────────────────────────────────────────────────────

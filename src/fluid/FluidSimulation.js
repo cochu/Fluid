@@ -28,9 +28,11 @@ import {
   COPY_FRAG,
   CLEAR_FRAG,
   SPLAT_FRAG,
+  SINK_FRAG,
   ADVECTION_FRAG,
   ADVECTION_REVERSE_FRAG,
   MACCORMACK_FRAG,
+  BFECC_FRAG,
   BOUNDARY_FRAG,
   VISCOSITY_FRAG,
   CURL_FRAG,
@@ -109,9 +111,11 @@ export class FluidSimulation {
       copy:             createProgram(gl, SIMPLE_VERT, COPY_FRAG),
       clear:            createProgram(gl, SIMPLE_VERT, CLEAR_FRAG),
       splat:            createProgram(gl, SIMPLE_VERT, SPLAT_FRAG),
+      sink:             createProgram(gl, SIMPLE_VERT, SINK_FRAG),
       advection:        createProgram(gl, SIMPLE_VERT, ADVECTION_FRAG),
       advectionRev:     createProgram(gl, SIMPLE_VERT, ADVECTION_REVERSE_FRAG),
       maccormack:       createProgram(gl, SIMPLE_VERT, MACCORMACK_FRAG),
+      bfecc:            createProgram(gl, SIMPLE_VERT, BFECC_FRAG),
       boundary:         createProgram(gl, SIMPLE_VERT, BOUNDARY_FRAG),
       viscosity:        createProgram(gl, BASE_VERT,   VISCOSITY_FRAG),
       curl:             createProgram(gl, BASE_VERT,   CURL_FRAG),
@@ -244,10 +248,20 @@ export class FluidSimulation {
     //      sparse obstacles; see anouk-cfd.md for the proper way.
     this._clearVelocityInObstacles();
 
-    // 11. Advect dye (MacCormack if enabled). Carrier is the latest
-    //     projected velocity, frozen across the three passes.
-    if (config.HIGH_QUALITY_ADVECTION) {
+    // 11. Advect dye. Three schemes available:
+    //       'standard'   — semi-Lagrangian (1 pass, most dissipative)
+    //       'maccormack' — 3 passes; correction at destination
+    //       'bfecc'      — 3 passes; correction of source field, then re-advect
+    //     BFECC is sharper than MacCormack on thin filaments (Selle 2008
+    //     §4.2) at identical GPU cost (the first two passes are shared).
+    //     `HIGH_QUALITY_ADVECTION` is the legacy boolean — when set true
+    //     and DYE_ADVECTION is unset, fall back to MacCormack.
+    const scheme = config.DYE_ADVECTION
+                || (config.HIGH_QUALITY_ADVECTION ? 'maccormack' : 'standard');
+    if (scheme === 'maccormack') {
       this._advectMacCormack(this.dye, this.velocity, this.dyeTmpFwd, this.dyeTmpBak, config.DENSITY_DISSIPATION, dt);
+    } else if (scheme === 'bfecc') {
+      this._advectBFECC(this.dye, this.velocity, this.dyeTmpFwd, this.dyeTmpBak, config.DENSITY_DISSIPATION, dt);
     } else {
       this._advect(this.dye, this.velocity, config.DENSITY_DISSIPATION, dt);
     }
@@ -281,6 +295,32 @@ export class FluidSimulation {
     // --- dye splat ---
     gl.uniform1i(uniforms.uTarget, this.dye.read.attach(0));
     gl.uniform3f(uniforms.uColor, color.r, color.g, color.b);
+    gl.uniform1f(uniforms.uRadius, config.SPLAT_RADIUS / 100);
+    this._blit(this.dye.write.fbo, this.dye.write.width, this.dye.write.height);
+    this.dye.swap();
+  }
+
+  /**
+   * Drain dye in a Gaussian neighbourhood. Multiplicative — dye RGB at
+   * each pixel is scaled by `(1 - amount * gauss(r))`, clamped to 0.
+   * Velocity is intentionally untouched (sinks are dye-only in v1).
+   *
+   * @param {number} x       UV x [0, 1]
+   * @param {number} y       UV y [0, 1]
+   * @param {number} amount  Peak drain fraction at the centre this
+   *                         frame (e.g. 0.05 removes 5 % per frame at
+   *                         the bull's-eye, less in the falloff).
+   */
+  drainDye(x, y, amount) {
+    const { gl, config } = this;
+    if (!(amount > 0)) return;
+    const aspectRatio = gl.canvas.width / gl.canvas.height;
+    const { program, uniforms } = this._prog.sink;
+    gl.useProgram(program);
+    gl.uniform1i(uniforms.uTarget, this.dye.read.attach(0));
+    gl.uniform1f(uniforms.uAspectRatio, aspectRatio);
+    gl.uniform1f(uniforms.uAmount, amount);
+    gl.uniform2f(uniforms.uPoint, x, y);
     gl.uniform1f(uniforms.uRadius, config.SPLAT_RADIUS / 100);
     this._blit(this.dye.write.fbo, this.dye.write.width, this.dye.write.height);
     this.dye.swap();
@@ -534,16 +574,71 @@ export class FluidSimulation {
   }
 
   /**
+   * BFECC dye advection. Passes 1 and 2 are byte-for-byte identical to
+   * the MacCormack pipeline (forward then reverse advect); only the
+   * combiner pass differs. We don't share a helper because the two
+   * methods may diverge later (e.g. Anouk's wishlist mentions a per-axis
+   * limiter for BFECC) and inlining keeps both call sites readable.
+   */
+  _advectBFECC(target, velocityFBO, tmpFwd, tmpBak, dissipation, dt) {
+    const { gl } = this;
+    const velTex = velocityFBO.read;
+    const phiN   = target.read;
+
+    // ── Pass 1: forward advect φ_n into tmpFwd (no dissipation).
+    {
+      const { program, uniforms } = this._prog.advection;
+      gl.useProgram(program);
+      gl.uniform1i(uniforms.uVelocity,    velTex.attach(0));
+      gl.uniform1i(uniforms.uSource,      phiN.attach(1));
+      gl.uniform2f(uniforms.uTexelSize,    velTex.texelSizeX, velTex.texelSizeY);
+      gl.uniform2f(uniforms.uDyeTexelSize, phiN.texelSizeX,   phiN.texelSizeY);
+      gl.uniform1f(uniforms.uDt, dt);
+      gl.uniform1f(uniforms.uDissipation, 1.0);
+      this._blit(tmpFwd.fbo, tmpFwd.width, tmpFwd.height);
+    }
+
+    // ── Pass 2: reverse advect tmpFwd into tmpBak (carrier still v_n).
+    {
+      const { program, uniforms } = this._prog.advectionRev;
+      gl.useProgram(program);
+      gl.uniform1i(uniforms.uVelocity,    velTex.attach(0));
+      gl.uniform1i(uniforms.uSource,      tmpFwd.attach(1));
+      gl.uniform2f(uniforms.uTexelSize,    velTex.texelSizeX, velTex.texelSizeY);
+      gl.uniform2f(uniforms.uDyeTexelSize, tmpFwd.texelSizeX, tmpFwd.texelSizeY);
+      gl.uniform1f(uniforms.uDt, dt);
+      this._blit(tmpBak.fbo, tmpBak.width, tmpBak.height);
+    }
+
+    // ── Pass 3: BFECC combiner — corrects the source field and re-advects
+    //           in a single fragment (linearity of bilerp does the merging).
+    {
+      const { program, uniforms } = this._prog.bfecc;
+      gl.useProgram(program);
+      gl.uniform1i(uniforms.uPhi,         phiN.attach(0));
+      gl.uniform1i(uniforms.uPhiBack,     tmpBak.attach(1));
+      gl.uniform1i(uniforms.uVelocity,    velTex.attach(2));
+      gl.uniform2f(uniforms.uTexelSize,    velTex.texelSizeX, velTex.texelSizeY);
+      gl.uniform2f(uniforms.uDyeTexelSize, phiN.texelSizeX,   phiN.texelSizeY);
+      gl.uniform1f(uniforms.uDt, dt);
+      gl.uniform1f(uniforms.uDissipation, dissipation);
+      this._blit(target.write.fbo, target.write.width, target.write.height);
+      target.swap();
+    }
+  }
+
+  /**
    * Free-slip boundary on the velocity field. Single full-screen pass on the
    * (small) velocity grid → negligible cost. Reads from velocity.read,
    * writes to velocity.write, swaps.
    */
   _enforceVelocityBoundary() {
-    const { gl } = this;
+    const { gl, config } = this;
     const { program, uniforms } = this._prog.boundary;
     gl.useProgram(program);
     gl.uniform1i(uniforms.uVelocity, this.velocity.read.attach(0));
     gl.uniform2i(uniforms.uSize, this.velocity.width, this.velocity.height);
+    gl.uniform1i(uniforms.uNoSlip, config.NO_SLIP_BOUNDARY ? 1 : 0);
     this._blit(this.velocity.write.fbo, this.velocity.write.width, this.velocity.write.height);
     this.velocity.swap();
   }

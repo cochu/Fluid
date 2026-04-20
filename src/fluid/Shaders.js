@@ -101,6 +101,40 @@ void main() {
 `;
 
 /**
+ * Painted-sink dye drain. Multiplies the existing dye RGB by
+ * (1 - uAmount * gauss(r)) clamped to [0, 1]. This:
+ *   - never injects negative dye into the RGBA16F buffer (which would
+ *     persist invisibly and re-emerge via bloom or additive splats),
+ *   - acts as a *fraction* removal so already-light areas drain less in
+ *     absolute terms than already-bright ones (visually natural drain),
+ *   - leaves velocity untouched — sinks are dye-only in v1; the
+ *     ambient VELOCITY_DISSIPATION carries the slowdown.
+ *
+ * Reuses the SPLAT_FRAG uniform layout (uTarget/uPoint/uRadius/uAspectRatio)
+ * so the JS-side draw loop can swap between additive and drain passes
+ * without rebinding the full uniform set.
+ */
+export const SINK_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uTarget;
+uniform float uAspectRatio;
+uniform float uAmount;
+uniform vec2  uPoint;
+uniform float uRadius;
+out vec4 fragColor;
+void main() {
+    vec2 p = vUv - uPoint;
+    p.x   *= uAspectRatio;
+    float g = exp(-dot(p, p) / uRadius);
+    float k = clamp(1.0 - uAmount * g, 0.0, 1.0);
+    vec3 dye = texture(uTarget, vUv).rgb * k;
+    fragColor = vec4(dye, 1.0);
+}
+`;
+
+/**
  * Semi-Lagrangian advection with manual bilinear interpolation.
  *
  * Works for both velocity self-advection (dyeTexelSize == velTexelSize)
@@ -250,11 +284,97 @@ void main() {
 `;
 
 /**
+ * BFECC (Back and Forth Error Compensation and Correction) combiner.
+ *
+ * Shares passes 1 (forward advect) and 2 (reverse advect) with the
+ * MacCormack scheme — so toggling between MacCormack and BFECC requires
+ * no extra GPU work outside this final pass. Where MacCormack adds the
+ * error correction *to the forward-advected field at the destination
+ * pixel*, BFECC corrects the *source field* and re-advects it, which is
+ * less dissipative for sharp dye fronts (Selle 2008, §4.2).
+ *
+ * The bilinear sample of (φ + 0.5(φ - φ_back)) at the trace-back
+ * coordinate equals 1.5*bilerp(φ) - 0.5*bilerp(φ_back), so we never need
+ * to materialise the corrected source field into a fourth FBO.
+ *
+ * Same Selle limiter as MacCormack — clamp the result to the four raw
+ * neighbour values of φ at the trace-back position so the second-order
+ * correction can never introduce a new extremum (overshoot guard).
+ *
+ * Inputs:
+ *   uPhi      : original field φ_n (frozen)
+ *   uPhiBack  : φ_back = advect(advect(φ_n, +dt), -dt)  (the BFECC
+ *               error round-trip; written by passes 1+2)
+ *   uVelocity : carrier velocity (projected v for dye)
+ */
+export const BFECC_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uPhi;
+uniform sampler2D uPhiBack;
+uniform sampler2D uVelocity;
+uniform vec2  uTexelSize;
+uniform vec2  uDyeTexelSize;
+uniform float uDt;
+uniform float uDissipation;
+out vec4 fragColor;
+
+vec4 bilerp(sampler2D sam, vec2 uv, vec2 tsize) {
+    vec2 st  = uv / tsize - 0.5;
+    vec2 iuv = floor(st);
+    vec2 fuv = fract(st);
+    vec4 a = texture(sam, (iuv + vec2(0.5, 0.5)) * tsize);
+    vec4 b = texture(sam, (iuv + vec2(1.5, 0.5)) * tsize);
+    vec4 c = texture(sam, (iuv + vec2(0.5, 1.5)) * tsize);
+    vec4 d = texture(sam, (iuv + vec2(1.5, 1.5)) * tsize);
+    return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
+}
+
+void main() {
+    // Velocity is sampled from the velocity grid (uTexelSize), but the
+    // trace-back coord lives in the dye grid's UV space — so the clamp
+    // bound below uses uDyeTexelSize, not uTexelSize. Asymmetric on
+    // purpose: when SIM_RESOLUTION ≠ DYE_RESOLUTION (the default) the
+    // two grids have different texel sizes.
+    vec2 vel   = bilerp(uVelocity, vUv, uTexelSize).xy;
+    vec2 coord = vUv - uDt * vel;
+    coord      = clamp(coord, 0.5 * uDyeTexelSize, 1.0 - 0.5 * uDyeTexelSize);
+
+    // Sample (phi + 0.5*(phi - phi_back)) bilinearly at the trace-back
+    // position. Linearity of bilinear interp lets us combine the two
+    // taps into a single weighted expression — no fourth FBO needed.
+    vec4 phiSample     = bilerp(uPhi,     coord, uDyeTexelSize);
+    vec4 phiBackSample = bilerp(uPhiBack, coord, uDyeTexelSize);
+    vec4 corrected     = 1.5 * phiSample - 0.5 * phiBackSample;
+
+    // Selle limiter on the raw (un-filtered) neighbour stencil of phi
+    // at the trace-back position — bounds the correction to actual
+    // cell values so we never invent dye that wasn't there.
+    vec2 st  = coord / uDyeTexelSize - 0.5;
+    vec2 iuv = floor(st);
+    vec4 a = texture(uPhi, (iuv + vec2(0.5, 0.5)) * uDyeTexelSize);
+    vec4 b = texture(uPhi, (iuv + vec2(1.5, 0.5)) * uDyeTexelSize);
+    vec4 c = texture(uPhi, (iuv + vec2(0.5, 1.5)) * uDyeTexelSize);
+    vec4 d = texture(uPhi, (iuv + vec2(1.5, 1.5)) * uDyeTexelSize);
+    vec4 mn = min(min(a, b), min(c, d));
+    vec4 mx = max(max(a, b), max(c, d));
+
+    fragColor = uDissipation * clamp(corrected, mn, mx);
+}
+`;
+
+/**
  * Free-slip velocity boundary condition (Stam / Harris GPU Gems 1, ch. 38).
  *
- * On the 1-texel boundary ring: read the inner neighbour and write
- * (-vn, vt) — normal component negated, tangential preserved. Interior
- * fragments are passed through unchanged.
+ * On the 1-texel boundary ring we synthesise a ghost-cell value from
+ * the inner neighbour:
+ *   - **free-slip** (uNoSlip = 0): write (-vn, vt) — normal component
+ *     negated so its average with the inner cell is zero (no flux
+ *     through the wall), tangential preserved (the fluid slides).
+ *   - **no-slip**  (uNoSlip = 1): write -inner — both components
+ *     negated so the average with the inner cell is the zero vector
+ *     (the fluid sticks to the wall, viscous drag near the edges).
  *
  * Boundary detection uses integer texel coordinates from gl_FragCoord, which
  * is exact (no float-precision ambiguity). texelFetch reads point-sampled
@@ -264,7 +384,8 @@ export const BOUNDARY_FRAG = /* glsl */`#version 300 es
 precision highp float;
 precision highp sampler2D;
 uniform sampler2D uVelocity;
-uniform ivec2     uSize;   // (width, height) of the velocity grid
+uniform ivec2     uSize;     // (width, height) of the velocity grid
+uniform int       uNoSlip;   // 0 = free-slip (default), 1 = no-slip
 out vec4 fragColor;
 
 void main() {
@@ -289,8 +410,14 @@ void main() {
         clamp(p.y + (bottom ? 1 : (top  ? -1 : 0)), 0, yMax)
     );
     vec4 v = texelFetch(uVelocity, inner, 0);
-    if (left || right) v.x = -v.x;
-    if (bottom || top) v.y = -v.y;
+    if (uNoSlip == 1) {
+        // No-slip: both components negated so cell+ghost average to 0.
+        v.xy = -v.xy;
+    } else {
+        // Free-slip: normal component negated, tangential preserved.
+        if (left || right) v.x = -v.x;
+        if (bottom || top) v.y = -v.y;
+    }
     fragColor = v;
 }
 `;
@@ -522,10 +649,25 @@ void main() {
     }
 
     if (uShading) {
-        // Subtle shading: darken where velocity is low (looks like shadows)
-        float speed = length(texture(uVelocity, vUv).xy);
-        float shade = 1.0 - exp(-speed * 4.0) * 0.15;
-        c *= shade;
+        // Faux-3D dye shading. Treat dye luminance as a height field,
+        // compute a screen-space normal from the local gradient, and
+        // light it with a fixed virtual sun. Cosmetic only — does not
+        // touch the simulation. Strength scales with local intensity
+        // so flat dark regions don't grow phantom relief.
+        vec2 px = 1.0 / vec2(textureSize(uTexture, 0));
+        const vec3 W = vec3(0.299, 0.587, 0.114);
+        float hL = dot(texture(uTexture, vUv - vec2(px.x, 0.0)).rgb, W);
+        float hR = dot(texture(uTexture, vUv + vec2(px.x, 0.0)).rgb, W);
+        float hD = dot(texture(uTexture, vUv - vec2(0.0, px.y)).rgb, W);
+        float hU = dot(texture(uTexture, vUv + vec2(0.0, px.y)).rgb, W);
+        float lumC   = dot(c, W);
+        float relief = clamp(lumC * 8.0, 0.0, 4.0);
+        vec3 n = normalize(vec3((hL - hR) * relief, (hD - hU) * relief, 1.0));
+        vec3 L = normalize(vec3(0.45, 0.50, 0.85));
+        float diffuse = max(0.0, dot(n, L)) * 0.55 + 0.55;
+        vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
+        float spec    = pow(max(0.0, dot(n, H)), 32.0) * 0.30;
+        c = c * diffuse + vec3(spec);
     }
 
     c = toneMap(c * 1.2);
