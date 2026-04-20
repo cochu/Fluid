@@ -39,15 +39,25 @@ one almost always re-introduces a known regression — see [`docs/agents/gotchas
    `bash tools/stamp-version.sh --amend` after every commit so
    [`src/version.js`](src/version.js) references its own SHA.
 6. **Validate JS syntax before committing.** `node --check <file>` on every
-   touched `.js`. There are no unit tests to catch typos.
-7. **Comments only when they add information.** This repo has a deliberate
+   touched `.js`. There are no unit tests to catch typos. **Also open
+   `tests/test.html`** — the `boot` suite there is the only test that
+   actually evaluates `src/main.js` and is the one that would have caught
+   PR #8's TDZ regression.
+7. **No top-level reference before declaration in `main.js`.** Any new
+   top-level `const`/`let` must be declared **above** every site that
+   reads it, **including inside object literals passed eagerly to
+   constructors** (e.g. the `new UI(CONFIG, { … })` options literal).
+   Method-shorthand keys are lazy and safe; bare value expressions are
+   eager and TDZ-throwing. See
+   [`docs/agents/gotchas.md#13`](docs/agents/gotchas.md#13-tdz-in-mainjs-boot--frozen-canvas-no-input-wired).
+8. **Comments only when they add information.** This repo has a deliberate
    style: explain *why* (or *what regression this fix prevents*), never *what*.
    See [`docs/agents/conventions.md`](docs/agents/conventions.md#comments).
-8. **Use the BMAD-Fluid dream team for non-trivial changes.** Pick at least
+9. **Use the BMAD-Fluid dream team for non-trivial changes.** Pick at least
    2–4 personas from [`docs/agents/personas/`](docs/agents/personas/), invoke
    them via rubber-duck *before* implementing, and again on the diff. See
    [`docs/agents/method.md`](docs/agents/method.md).
-9. **Every commit message body must contain a short poem on the beauty of
+10. **Every commit message body must contain a short poem on the beauty of
    fluids.** Block prefixed with `~~~ on fluids ~~~`, placed before the
    `Co-authored-by` trailer. This is the comprehension check — see
    [`docs/agents/method.md#4-the-poem-requirement`](docs/agents/method.md#4-the-poem-requirement-the-real-review-comprehension-test).

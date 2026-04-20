@@ -192,3 +192,34 @@ Each entry: symptom → root cause → fix → why it matters.
   `adaptiveCooldownUntil` out by one downscale cool-down so the next
   decision waits for a fresh window of samples. `lastTime` is already
   reset there for the same reason.
+
+---
+
+## 13. TDZ in `main.js` boot — frozen canvas, no input wired
+
+- **Symptom:** The HTML/CSS shell paints (buttons, gradient background,
+  version tag), but the canvas never animates and pointer events do
+  nothing. Console shows
+  `ReferenceError: Cannot access 'X' before initialization`
+  pointing into `src/main.js`.
+- **Root cause:** A new top-level `const`/`let` was added **after** the
+  `new UI(CONFIG, { … })` call but is referenced **eagerly** inside the
+  options literal — typically as a property short-hand value like
+  `recordingSupported: !!recorder,`. The literal is evaluated at the
+  call site, before the binding is initialised, which throws a TDZ
+  ReferenceError that aborts the whole module. Method-shorthand keys
+  (`onSnapshot() { … }`) are lazy and not affected; **bare expression
+  values are eager and are**.
+- **Fix in place:** PR #8 hoisted `const recorder = …` (and the
+  cautionary comment in `src/main.js`) above `new UI(...)`. Same
+  hoisting rule applies to any future binding referenced in that
+  literal.
+- **What NOT to do:** Don't paper over by switching the eager value to
+  a getter (`get recordingSupported() { return !!recorder; }`); the UI
+  caches the value at construction and the runtime feature flag would
+  silently lie. Just declare the binding before the call.
+- **Regression net:** the `boot` suite in `tests/test.js` loads
+  `index.html` inside an isolated iframe and asserts no uncaught script
+  errors fire during boot. **Run it on every PR that touches `main.js`
+  or any of its imports.** It is the only test in the harness that
+  actually evaluates the bootstrap module.
