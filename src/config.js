@@ -111,12 +111,13 @@ export const CONFIG = {
   BLOOM_ITERATIONS: 8,
   BLOOM_RESOLUTION: 256,
   /* Tuned against DYE_BRIGHTNESS=0.15 (typical accumulated dye lives
-   * in 0.2-0.5). Threshold 0.22 lets bright splat overlaps glow, the
-   * tight 0.12 knee keeps the glow defined instead of a vague wash,
-   * and 1.35 intensity makes the toggle visibly punchy. */
-  BLOOM_INTENSITY: 1.35,
-  BLOOM_THRESHOLD: 0.22,
-  BLOOM_SOFT_KNEE: 0.12,
+   * in 0.2-0.5). Threshold 0.15 lets even mid-bright dye start glowing,
+   * the wider 0.20 knee softens the bright/dark transition for a richer
+   * halo, and 1.9 intensity (paired with the quadratic HDR boost in
+   * DISPLAY_FRAG) makes the toggle clearly painterly rather than fade. */
+  BLOOM_INTENSITY: 1.9,
+  BLOOM_THRESHOLD: 0.15,
+  BLOOM_SOFT_KNEE: 0.20,
 
   /* ── Particles ────────────────────────────────────────────────────── */
   PARTICLES: true,
@@ -131,8 +132,10 @@ export const CONFIG = {
    */
   PARTICLE_LIFETIME: 5.0,
 
-  /** Render point size (px, before DPR scaling). Larger = more aquatic blob. */
-  PARTICLE_SIZE: 4.5,
+  /** Render point size (px, before DPR scaling). Larger = more aquatic blob.
+   *  Bumped from 4.5 → 5.5 to give the wider luminous halo room to read
+   *  without the core feeling chunkier (the halo Gaussian is shallow). */
+  PARTICLE_SIZE: 5.5,
 
   /**
    * Fraction of particles relocated to the cursor on each "drop" frame
