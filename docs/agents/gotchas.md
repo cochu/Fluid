@@ -37,10 +37,17 @@ Each entry: symptom → root cause → fix → why it matters.
 
   ```
   DYE_BRIGHTNESS    = 0.15
-  BLOOM_THRESHOLD   = 0.22   // overlapping splats peak ~0.2..0.5
-  BLOOM_SOFT_KNEE   = 0.12   // tight knee = defined glow, not a wash
-  BLOOM_INTENSITY   = 1.35   // makes the toggle obviously punchy
+  BLOOM_THRESHOLD   = 0.15   // mid-bright dye starts glowing, not just overlaps
+  BLOOM_SOFT_KNEE   = 0.20   // wider knee = richer, painterly halo
+  BLOOM_INTENSITY   = 1.9    // paired with the quadratic HDR kicker in DISPLAY_FRAG
   ```
+
+  The quadratic kicker in `DISPLAY_FRAG` (`c += bloom*I + bloom*bloom*I*0.55`)
+  is what makes the bloom feel "punchy" rather than a flat linear wash —
+  removing it sends us straight back to the fade look users complain about.
+  Earlier values (0.22 / 0.12 / 1.35) extracted only near-white overlaps and
+  composited them linearly, which on top of the ACES tone-map made the toggle
+  almost invisible.
 
 - **Particle highlights don't bloom** — particles render *after* the bloom
   pass that runs inside `fluid.render`. Acceptable trade-off; revisit only if
