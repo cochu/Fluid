@@ -176,18 +176,27 @@ network disabled — the simulation will start exactly the same way.
 
 
 
+## Controls
+
 | Control | Action |
 |---|---|
-| **↺** | Reset simulation |
+| **↺** | Reset simulation, clear obstacles & sources |
 | **✦** | Toggle GPU particles |
 | **💧** | Drop particles — press and drag this button onto the canvas to pour particles at the pointer |
 | **✺** | Toggle bloom post-process |
-| **◐** | Toggle colorful auto-hue mode |
+| **◐** | Cycle hue palette (rainbow / cycle / ocean / sunset / magma / forest / mono) |
 | **🎤** | Toggle **audio reactivity** — bass beats from the microphone produce expanding speaker-like rings |
-| **Force** slider | Splat force magnitude |
-| **Particles** slider | Particle count (500 – 10 000) |
-| **Dissipation** slider | How quickly dye & velocity fade |
-| **⚡** | Performance mode (halves resolution) |
+| **🧭** | Toggle **tilt reactivity** — phone tilt drifts the fluid (mobile, asks motion permission) |
+| **🧱** | Paint obstacle mode — drag on the canvas to paint walls that deflect the fluid |
+| **🧽** | Clear painted obstacles |
+| **💠** | Place a permanent source — tap or drag on the canvas to set position + direction; click on the marker to remove it |
+| **⏸** | Pause / resume (also `Space`) |
+| **📷** | Save a PNG snapshot (also `S`) |
+| **Force** slider | Splat force magnitude (perceptually quadratic, 5 → 4500) |
+| **Persistence** slider | How long dye & velocity linger (smoothstep curve, 0.92 → 0.999) |
+| **Viscosity** slider | Honey-thick flow (cubic curve, 0 → 0.05) |
+| **≈** | Toggle high-quality (MacCormack) advection on the dye |
+| **⚡** | Performance mode — halves SIM/DYE resolution and lowers iteration counts |
 
 ---
 
@@ -246,10 +255,28 @@ settings, or Jacobi iteration count.
 
 ## Roadmap
 
-- [ ] **Obstacles** — add static shapes that deflect the fluid  
-- [x] **Audio-reactive** — drive splat force from microphone input *(see "Audio reactivity" section)*  
-- [ ] **Dye save/export** — screenshot or gif export  
-- [ ] **WebGPU** migration for even better mobile throughput *(capability is now probed at startup; full port pending)*  
-- [x] **PWA** manifest + offline support *(see "Progressive Web App" section)*  
-- [ ] **Color presets** — pastel, monochrome, fire, aurora themes  
-- [ ] **Viscosity control** — diffusion iterations exposed in the UI  
+Shipped:
+
+- [x] **Audio-reactive** — drive splat force from microphone input *(see "Audio reactivity" section)*
+- [x] **PWA** manifest + offline support *(see "Progressive Web App" section)*
+- [x] **Color presets** — 7 palettes cycled by the ◐ button (rainbow, cycle, ocean, sunset, magma, forest, mono)
+- [x] **Viscosity control** — cubic-curve slider exposed in the UI
+- [x] **Obstacles** — paint walls with 🧱, clear with 🧽; the velocity field reads them as solid cells
+- [x] **Permanent sources** — place persistent emitters with 💠 (drag = direction, tap a marker to remove)
+- [x] **Tilt reactivity** — 🧭 stirs the fluid from the device accelerometer (with iOS motion-permission flow)
+- [x] **PNG snapshot** — 📷 saves the live frame as a PNG named with the build SHA
+- [x] **High-quality dye advection** — MacCormack toggle (≈) on the dye field only
+
+In progress / planned:
+
+- [ ] **Animated export** — WebM / GIF capture for short loops (PNG snapshot is already shipped)
+- [ ] **WebGPU** migration *(see [`docs/webgpu-rnd.md`](docs/webgpu-rnd.md) — R&D notes; capability is probed at startup, full port pending)*
+- [ ] **Settings persistence & shareable URLs** — restore last-used config across reloads, deep-link a configured scene
+- [ ] **Named scene presets** — Aurora, Ink, Lava, Smoke, … (combinations of palette + viscosity + bloom + vorticity)
+- [ ] **Wallpaper mode** — UI-hidden screensaver with gentle auto-splats
+- [ ] **Obstacle brushes** — variable size, eraser, undo
+- [ ] **Painted sinks** — counterpart to sources, drain dye + velocity
+- [ ] **MIDI input** — Web MIDI controller mapping (notes → splats, CC → live tunables)
+- [ ] **Volumetric / faux-3D dye shading** — wire the dormant `CONFIG.SHADING` path into the display shader
+- [ ] **Adaptive auto-tune with recovery** — climb the resolution back up when frame budget loosens
+- [ ] **Visual non-regression harness** — scripted scenarios + deterministic frame hashes
