@@ -19,6 +19,12 @@ import { AudioReactivity }  from './audio/AudioReactivity.js';
 import { AccelerometerInput } from './input/AccelerometerInput.js';
 import { pickSplatColor }   from './input/Palettes.js';
 import { BUILD_VERSION }    from './version.js';
+import {
+  bootstrap as bootPersistence,
+  installAutoSave,
+  buildShareUrl,
+  clearStorage as clearPersistedStorage,
+} from './persistence.js';
 
 // Expose the build identifier early so the UI version tag (and any
 // console snooping) can pick it up without an explicit import.
@@ -74,6 +80,20 @@ gl.disable(gl.CULL_FACE);
 /* ──────────────────────────────────────────────────────────────────────
    3.  Subsystem initialisation
    ────────────────────────────────────────────────────────────────────── */
+
+// Restore persisted settings BEFORE constructing the simulation so that
+// PERF_MODE / SOURCES / palette etc. are already in CONFIG when the FBOs
+// are sized. URL hash takes precedence over localStorage; both fail silent.
+const persistBoot = bootPersistence();
+if (CONFIG.PERF_MODE) {
+  // Apply the same transforms the perf-mode toggle does, so a persisted
+  // perf-mode user gets the smaller grid on first frame instead of paying
+  // a full-resolution rebuild.
+  CONFIG.SIM_RESOLUTION       = 64;
+  CONFIG.DYE_RESOLUTION       = 256;
+  CONFIG.PRESSURE_ITERATIONS  = 10;
+  CONFIG.BLOOM_ITERATIONS     = 4;
+}
 
 let fluid     = new FluidSimulation(gl, ext, CONFIG);
 let particles = new ParticleSystem(gl, ext, CONFIG);
@@ -221,6 +241,44 @@ const ui = new UI(CONFIG, {
     fluid.clearObstacles();
     obstacleStrokes.length = 0;
   },
+  onClearPersisted() {
+    clearPersistedStorage();
+  },
+  onShare() {
+    return buildShareUrl();
+  },
+  onConfigMutated(_reason) {
+    // Mutation paths that bypass the panel-level delegated listener
+    // (source removed via SVG overlay, preset applied, etc.) need to
+    // re-arm the debounced save explicitly.
+    persistAutoSave?.requestSave();
+  },
+  onPresetChange(_id) { /* visual feedback already handled by UI; no rebuild needed */ },
+});
+
+// Re-fire 'input' events on any slider whose DOM value was restored at
+// boot so the existing UI handlers re-derive engineering CONFIG values
+// via the canonical curve mappings (avoids a stored-vs-derived skew).
+for (const id of persistBoot.sliderIds) {
+  document.getElementById(id)?.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// Replay any persisted SOURCES into the UI overlay so handles render.
+if (Array.isArray(CONFIG.SOURCES) && CONFIG.SOURCES.length) {
+  ui.refreshSources?.();
+}
+
+// Install the auto-save watcher AFTER the UI is built so all wired
+// handlers run on the bubble phase first; we then snapshot the
+// post-mutation CONFIG. When the boot source is a URL hash, suppress
+// the very first debounced save (~0.7 s) so visiting a shared link
+// doesn't permanently overwrite the recipient's local snapshot.
+const persistSuppressUntil = persistBoot.source === 'hash'
+  ? performance.now() + 700
+  : 0;
+const persistAutoSave = installAutoSave({
+  panelEl: document.getElementById('ui-panel'),
+  gate:    () => performance.now() < persistSuppressUntil,
 });
 
 /** Most recent particle drop request from the UI; consumed in animate(). */

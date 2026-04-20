@@ -211,4 +211,12 @@ export const CONFIG = {
   SOURCES: [],
   /** Master enable for the source-placement pointer mode. Toggled by 💠. */
   SOURCE_MODE: false,
+
+  /**
+   * User-explicit performance mode. Distinct from the live SIM_RESOLUTION
+   * (which adaptive downscale also rewrites): this captures the user's
+   * intent so persistence can restore the perf-mode preset on reload
+   * without freezing a transient adaptive state. Toggled by ⚡.
+   */
+  PERF_MODE: false,
 };

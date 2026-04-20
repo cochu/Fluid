@@ -72,6 +72,7 @@ function persistenceFromSlider(t) {
 }
 
 import { COLOR_MODE_LABELS, nextMode } from '../input/Palettes.js';
+import { PRESETS, nextPresetId, applyPreset, getPreset } from '../presets.js';
 
 /* ──────────────────────────────────────────────────────────────────────
    UI class
@@ -202,8 +203,9 @@ export class UI {
     document.addEventListener('pointermove',   cancelPress, true);
   }
 
-  /** Briefly show a tooltip with custom text near `el`, then auto-hide. */
-  _flashTip(el, msg) {
+  /** Briefly show a tooltip with custom text near `el`, then auto-hide.
+   *  Optional `durationMs` overrides the default dwell time (1100 ms). */
+  _flashTip(el, msg, durationMs = 1100) {
     const tip = this._tooltipEl;
     if (!tip || !el) return;
     tip.textContent = msg;
@@ -216,7 +218,7 @@ export class UI {
     this._flashT = setTimeout(() => {
       tip.classList.remove('visible');
       tip.setAttribute('aria-hidden', 'true');
-    }, 1100);
+    }, durationMs);
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -292,21 +294,22 @@ export class UI {
     });
 
     this._bind('btn-perf', 'click', () => {
-      const perfMode = cfg.SIM_RESOLUTION === 64;
-      if (perfMode) {
-        cfg.SIM_RESOLUTION       = 128;
-        cfg.DYE_RESOLUTION       = 512;
-        cfg.PRESSURE_ITERATIONS  = 25;
-        cfg.BLOOM_ITERATIONS     = 8;
-        document.getElementById('btn-perf')?.classList.remove('perf-mode');
-      } else {
+      const newPerfMode = !cfg.PERF_MODE;
+      cfg.PERF_MODE = newPerfMode;
+      if (newPerfMode) {
         cfg.SIM_RESOLUTION       = 64;
         cfg.DYE_RESOLUTION       = 256;
         cfg.PRESSURE_ITERATIONS  = 10;
         cfg.BLOOM_ITERATIONS     = 4;
         document.getElementById('btn-perf')?.classList.add('perf-mode');
+      } else {
+        cfg.SIM_RESOLUTION       = 128;
+        cfg.DYE_RESOLUTION       = 512;
+        cfg.PRESSURE_ITERATIONS  = 25;
+        cfg.BLOOM_ITERATIONS     = 8;
+        document.getElementById('btn-perf')?.classList.remove('perf-mode');
       }
-      this._cb.onTogglePerfMode?.(!perfMode);
+      this._cb.onTogglePerfMode?.(newPerfMode);
     });
 
     this._bind('btn-hq-advect', 'click', () => {
@@ -323,6 +326,9 @@ export class UI {
     this._bindSpawnButton();
     this._bindObstacleButtons();
     this._bindSourceButton();
+    this._bindPresetButton();
+    this._bindShareButton();
+    this._bindResetLongPress();
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -413,9 +419,116 @@ export class UI {
         if (Number.isFinite(i)) {
           this._config.SOURCES.splice(i, 1);
           this._renderSources();
+          // Source removal is a CONFIG mutation that the panel-level
+          // delegated listener can't see (the click landed on the SVG
+          // overlay, not the panel). Tell the persistence layer
+          // explicitly so the change survives a reload.
+          this._cb.onConfigMutated?.('source-removed');
         }
       });
     });
+  }
+
+
+  /* ──────────────────────────────────────────────────────────────────
+     Named scene presets (✨)
+     ────────────────────────────────────────────────────────────────── */
+
+  _bindPresetButton() {
+    const btn = document.getElementById('btn-preset');
+    if (!btn) return;
+    // Track current preset id only on the button (no new CONFIG field —
+    // presets are merge functions, not first-class state). Boot starts
+    // unset; the first click activates the preset AFTER `default` so the
+    // user feels a visible change. We pre-load the dataset attribute so
+    // the tooltip already advertises the next destination.
+    btn.dataset.preset = btn.dataset.preset || 'default';
+    btn.dataset.tip    = `Preset: ${getPreset(btn.dataset.preset).label} (tap to cycle)`;
+    btn.addEventListener('click', () => {
+      const nextId = nextPresetId(btn.dataset.preset);
+      btn.dataset.preset = nextId;
+      const p = getPreset(nextId);
+      const sliderIds = applyPreset(nextId, this._config);
+      // Fire synthetic input events so existing slider handlers re-derive
+      // engineering CONFIG values (force / persistence / viscosity).
+      for (const id of sliderIds) {
+        document.getElementById(id)?.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      // Reflect the toggle states for buttons the preset just changed.
+      this._syncStates();
+      // Update the cycler tooltip to advertise the *next* destination,
+      // and flash the *current* preset name. Marcus: 2.5 s dwell since
+      // presets are less obvious than the palette cycler.
+      btn.dataset.tip = `Preset: ${p.label} (tap to cycle)`;
+      this._flashTip(btn, p.label, 2500);
+      this._cb.onConfigMutated?.('preset');
+      this._cb.onPresetChange?.(nextId);
+    });
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+     Share-link button (🔗) — copies the current settings as a URL
+     ────────────────────────────────────────────────────────────────── */
+
+  _bindShareButton() {
+    const btn = document.getElementById('btn-share');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      const url = this._cb.onShare?.();
+      if (!url) {
+        this._flashTip(btn, 'Share unavailable');
+        return;
+      }
+      let copied = false;
+      try {
+        await navigator.clipboard?.writeText(url);
+        copied = true;
+      } catch (_) {
+        // Some browsers / contexts block clipboard. Fall back to a prompt
+        // so the user can copy manually.
+        try { window.prompt('Share this link:', url); copied = true; }
+        catch (_) { /* noop */ }
+      }
+      this._flashTip(btn, copied ? 'Copied! Share this link' : 'Copy failed');
+    });
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+     Long-press on Reset (↺) — also clears the persisted snapshot.
+     The standard click still resets the simulation; only a sustained
+     ≥700 ms press also wipes localStorage so a stuck-config can be
+     escaped without dev-tools. The tooltip advertises the gesture.
+     ────────────────────────────────────────────────────────────────── */
+
+  _bindResetLongPress() {
+    const btn = document.getElementById('btn-reset');
+    if (!btn) return;
+    // Update tooltip to advertise the long-press (first paint).
+    btn.dataset.tip = 'Reset (long-press: also clear saved settings)';
+    let timer    = 0;
+    let firedLP  = false;
+    const start = () => {
+      firedLP = false;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        firedLP = true;
+        this._cb.onClearPersisted?.();
+        this._flashTip(btn, 'Saved settings cleared');
+        // Light haptic on touch.
+        if (navigator.vibrate) try { navigator.vibrate(15); } catch (_) {}
+      }, 700);
+    };
+    const cancel = () => { clearTimeout(timer); };
+    btn.addEventListener('pointerdown', start);
+    btn.addEventListener('pointerup',   cancel);
+    btn.addEventListener('pointerleave',cancel);
+    btn.addEventListener('pointercancel',cancel);
+    // The synchronous click handler runs after pointerup; suppress the
+    // reset action when the long-press already fired so a clear-and-reset
+    // becomes just a clear (otherwise the user gets both — surprising).
+    btn.addEventListener('click', (e) => {
+      if (firedLP) { e.stopImmediatePropagation(); firedLP = false; }
+    }, true);
   }
 
 
@@ -613,5 +726,10 @@ export class UI {
     this._toggle('btn-tilt',      this._config.TILT_REACTIVE);
     this._toggle('btn-obstacles', this._config.OBSTACLE_MODE);
     this._toggle('btn-source',    this._config.SOURCE_MODE);
+    // Reflect the user-explicit perf-mode flag (the button's visual state
+    // mirrors CONFIG.PERF_MODE, not the live SIM_RESOLUTION which adaptive
+    // downscale can mutate transiently).
+    const perfBtn = document.getElementById('btn-perf');
+    if (perfBtn) perfBtn.classList.toggle('perf-mode', !!this._config.PERF_MODE);
   }
 }
