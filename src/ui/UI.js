@@ -106,6 +106,91 @@ import { COLOR_MODE_LABELS, nextMode } from '../input/Palettes.js';
 import { PRESETS, nextPresetId, applyPreset, getPreset } from '../presets.js';
 
 /* ──────────────────────────────────────────────────────────────────────
+   Source/sink force-gauge helpers
+   --------------------------------------------------------------------
+   Shared by the live drag preview and the permanent SVG markers so
+   the two visual encodings stay in lockstep. Pure functions, exported
+   for the test harness.
+   ────────────────────────────────────────────────────────────────────── */
+
+/** Saturation knee for the drag-distance gauge: a drag covering this
+ *  fraction of the canvas's smaller side maps to t == 1. */
+export const DRAG_T_FULL_FRACTION = 0.25;
+
+/** Sink rate range produced by a max-length placement drag. The lower
+ *  bound is a deliberately gentle drain; the upper bound is the point
+ *  beyond which a sink visually consumes its surroundings instantly
+ *  (and stops being legible as a "drain" rather than an erase). */
+export const SINK_RATE_MIN = 0.3;
+export const SINK_RATE_MAX = 4.0;
+
+/** UV-distance threshold below which a drag is treated as a tap (so
+ *  a finger jitter doesn't bias the placed source's direction or
+ *  the sink's rate). Mirrors the legacy `0.015` constant in main.js. */
+export const TAP_DRAG_UV = 0.015;
+
+/** Reference UV magnitude that the source arrow uses as its full-scale
+ *  colour/length anchor: a 25 % min-dim drag scaled by the legacy
+ *  `* 4.5` factor in main.js (`0.25 * 4.5 ≈ 1.125`). Sources at or
+ *  above this magnitude render at the warm end of the gradient. */
+const SOURCE_MAGNITUDE_FULL = DRAG_T_FULL_FRACTION * 4.5;
+
+/** Map a screen-space drag distance (in pixels) to a normalised force
+ *  parameter t ∈ [0, 1], saturating at DRAG_T_FULL_FRACTION of the
+ *  smaller canvas dimension. Aspect-ratio independent. */
+export function dragLengthToT(screenLen, w, h) {
+  const reference = Math.max(1, Math.min(w, h) * DRAG_T_FULL_FRACTION);
+  const t = screenLen / reference;
+  return t < 0 ? 0 : (t > 1 ? 1 : t);
+}
+
+/** Map a stored sink `rate` back to t ∈ [0, 1] for colour/radius. The
+ *  legacy `rate == 1` (tap-placed) lands near t ≈ 0.23, slightly cool. */
+export function sinkRateToT(rate) {
+  const r = Number.isFinite(+rate) ? +rate : 1;
+  const t = (r - SINK_RATE_MIN) / (SINK_RATE_MAX - SINK_RATE_MIN);
+  return t < 0 ? 0 : (t > 1 ? 1 : t);
+}
+
+/** Map a t ∈ [0, 1] to a sink rate in [SINK_RATE_MIN, SINK_RATE_MAX]. */
+export function tToSinkRate(t) {
+  const c = t < 0 ? 0 : (t > 1 ? 1 : t);
+  return SINK_RATE_MIN + (SINK_RATE_MAX - SINK_RATE_MIN) * c;
+}
+
+/** Map a stored source UV-velocity magnitude to t ∈ [0, 1]. Used by
+ *  the permanent arrow renderer to colour-code already-placed sources
+ *  the same way the live preview does. */
+export function sourceMagnitudeToT(uvLen) {
+  const t = uvLen / SOURCE_MAGNITUDE_FULL;
+  return t < 0 ? 0 : (t > 1 ? 1 : t);
+}
+
+/** Force gauge gradient. Two-segment lerp through cool-blue → cyan/green
+ *  → warm-red so the colour reads as "low / mid / high" at a glance.
+ *  Pure function — returned as an `rgb(...)` string for direct use as
+ *  an SVG `stroke` / `fill` attribute. */
+export function forceGradient(t) {
+  const c = t < 0 ? 0 : (t > 1 ? 1 : t);
+  // Stops chosen so the cool end stays clearly readable on dark dye
+  // and the warm end clearly reads as "max" without saturating into
+  // pure red (which would clash with the rainbow palette).
+  const stops = [
+    [ 80, 140, 255], //  0.0  cool blue
+    [ 80, 230, 180], //  0.5  cyan/green
+    [255, 110,  80], //  1.0  warm red
+  ];
+  const seg = c < 0.5 ? 0 : 1;
+  const u   = c < 0.5 ? c * 2 : (c - 0.5) * 2;
+  const lo  = stops[seg];
+  const hi  = stops[seg + 1];
+  const r = Math.round(lo[0] + (hi[0] - lo[0]) * u);
+  const g = Math.round(lo[1] + (hi[1] - lo[1]) * u);
+  const b = Math.round(lo[2] + (hi[2] - lo[2]) * u);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
    UI class
    ────────────────────────────────────────────────────────────────────── */
 
@@ -120,6 +205,8 @@ export class UI {
     this._fpsEl     = document.getElementById('fps-counter');
     this._versionEl = document.getElementById('version-tag');
     this._tooltipEl = document.getElementById('tooltip');
+    /** @type {{kind:'source'|'sink', startUV:{x,y}, currentUV:{x,y}}|null} */
+    this._previewState = null;
 
     this._initVersionTag();
     this._initTooltips();
@@ -599,6 +686,26 @@ export class UI {
   /** Re-paint the SVG markers + arrows from CONFIG.SOURCES. */
   refreshSources() { this._renderSources(); }
 
+  /**
+   * Live preview during a source/sink placement drag. Called by
+   * `main.js` on pointerdown/pointermove while SOURCE_MODE or
+   * SINK_MODE is active; cleared on pointerup/cancel.
+   *
+   * @param {{kind: 'source'|'sink', startUV: {x,y}, currentUV: {x,y}}} state
+   */
+  showPlacementPreview(state) {
+    if (!state) { this.clearPlacementPreview(); return; }
+    this._previewState = state;
+    this._renderSources();
+  }
+
+  /** Tear down the live drag preview. */
+  clearPlacementPreview() {
+    if (!this._previewState) return;
+    this._previewState = null;
+    this._renderSources();
+  }
+
   _renderSources() {
     const svg = this._svgOverlay;
     if (!svg) return;
@@ -609,42 +716,72 @@ export class UI {
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
     svg.setAttribute('width',  w);
     svg.setAttribute('height', h);
-    svg.style.display = list.length ? 'block' : 'none';
+    const preview = this._previewState;
+    const visible = list.length || preview;
+    svg.style.display = visible ? 'block' : 'none';
 
     let html = '';
-    if (list.length) {
+    if (visible) {
+      // The arrow marker is referenced by both the permanent source
+      // arrows AND the live source-preview arrow, so we always emit
+      // it whenever the overlay is visible at all (cheap defs block,
+      // browsers dedupe by id).
       html += `<defs><marker id="src-arrow" viewBox="0 0 10 10" refX="9" refY="5" `
            +  `markerWidth="6" markerHeight="6" orient="auto-start-reverse">`
-           +  `<path d="M0,0 L10,5 L0,10 Z" fill="rgba(255,255,255,0.85)"/></marker></defs>`;
+           +  `<path d="M0,0 L10,5 L0,10 Z" fill="context-stroke"/></marker></defs>`;
       for (let i = 0; i < list.length; i++) {
         const s = list[i];
         const px = s.x * w;
         const py = (1 - s.y) * h;
         if (s.kind === 'sink') {
-          // Sinks are non-directional — render a darker hollow ring
-          // with a minus sign so the affordance reads as "drain", and
-          // visually distinct from the bright source dots/arrows.
+          // Sinks: ring radius + colour encode the stored `rate`.
+          // rate==1 (legacy/tap) → mid-cool tone, smallest ring.
+          // rate∈[SINK_RATE_MIN..SINK_RATE_MAX] (drag-placed) → grows
+          // and warms. Minus glyph stays as the affordance.
+          const t      = sinkRateToT(s.rate);
+          const colour = forceGradient(t);
+          const radius = 9 + 6 * t;          // 9..15 px
+          const stroke = 1.5 + 1.5 * t;      // 1.5..3 px
           html += `<g class="src" data-i="${i}">`
-               +  `<circle cx="${px}" cy="${py}" r="11" `
-               +  `fill="rgba(0,0,0,0.35)" stroke="rgba(255,255,255,0.85)" `
-               +  `stroke-width="2" stroke-dasharray="3 2"/>`
-               +  `<line x1="${px - 5}" y1="${py}" x2="${px + 5}" y2="${py}" `
+               +  `<circle cx="${px}" cy="${py}" r="${radius.toFixed(1)}" `
+               +  `fill="rgba(0,0,0,0.35)" stroke="${colour}" `
+               +  `stroke-width="${stroke.toFixed(2)}" stroke-dasharray="3 2"/>`
+               +  `<line x1="${(px - 5).toFixed(1)}" y1="${py}" `
+               +  `x2="${(px + 5).toFixed(1)}" y2="${py}" `
                +  `stroke="rgba(255,255,255,0.95)" stroke-width="2" stroke-linecap="round"/>`
-               +  `<circle cx="${px}" cy="${py}" r="16" fill="transparent" class="src-hit"/>`
+               +  `<circle cx="${px}" cy="${py}" r="${(radius + 5).toFixed(1)}" `
+               +  `fill="transparent" class="src-hit"/>`
                +  `</g>`;
           continue;
         }
-        const len = Math.hypot(s.dx, s.dy);
-        const k   = len > 0 ? Math.min(80, 60 + len * 30) : 0;
-        const ex  = px + (len ? (s.dx / len) * k : 0);
-        const ey  = py + (len ? -(s.dy / len) * k : 0);
+        // Source: arrow direction must be in *screen* space — the
+        // stored (dx, dy) live in UV coords, so a non-square canvas
+        // would otherwise tilt the arrow off the user's drag (gotcha
+        // #14). Multiply by canvas (W, H) (with y flipped: SVG y
+        // grows downward) before normalising.
+        const sxRaw = s.dx * w;
+        const syRaw = -s.dy * h;
+        const screenLen = Math.hypot(sxRaw, syRaw);
+        // Encode magnitude through both arrow length and colour. The
+        // full-scale reference is the magnitude produced by a 25 %
+        // min-dim drag (≈ 4.5 * 0.25 = 1.125 in UV units).
+        const t      = sourceMagnitudeToT(Math.hypot(s.dx, s.dy));
+        const colour = forceGradient(t);
+        const k      = screenLen > 0 ? (30 + 60 * t) : 0;
+        const ex     = px + (screenLen ? (sxRaw / screenLen) * k : 0);
+        const ey     = py + (screenLen ? (syRaw / screenLen) * k : 0);
+        const stroke = 1.5 + 2.0 * t;
         html += `<g class="src" data-i="${i}">`
-             +  `<line x1="${px}" y1="${py}" x2="${ex}" y2="${ey}" `
-             +  `stroke="rgba(255,255,255,0.65)" stroke-width="2" marker-end="url(#src-arrow)"/>`
+             +  `<line x1="${px}" y1="${py}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}" `
+             +  `stroke="${colour}" stroke-width="${stroke.toFixed(2)}" `
+             +  `marker-end="url(#src-arrow)"/>`
              +  `<circle cx="${px}" cy="${py}" r="9" fill="rgba(255,255,255,0.18)" `
              +  `stroke="rgba(255,255,255,0.85)" stroke-width="2"/>`
              +  `<circle cx="${px}" cy="${py}" r="14" fill="transparent" class="src-hit"/>`
              +  `</g>`;
+      }
+      if (preview) {
+        html += this._previewSVG(preview, w, h);
       }
     }
     svg.innerHTML = html;
@@ -664,6 +801,63 @@ export class UI {
         }
       });
     });
+  }
+
+  /**
+   * Build the SVG fragment for the live drag preview (source or sink).
+   * Pure of side effects so the test harness can render it offline.
+   */
+  _previewSVG(preview, w, h) {
+    const sx = preview.startUV.x   * w;
+    const sy = (1 - preview.startUV.y) * h;
+    const cx = preview.currentUV.x * w;
+    const cy = (1 - preview.currentUV.y) * h;
+    const dx = cx - sx;
+    const dy = cy - sy;
+    const screenLen = Math.hypot(dx, dy);
+    const t = dragLengthToT(screenLen, w, h);
+    const colour = forceGradient(t);
+    // Saturation cue at t==1: thicker stroke + soft glow shadow.
+    const overdrive = t >= 0.999;
+    const filter = overdrive ? ' filter="url(#src-glow)"' : '';
+    const glowDef = overdrive
+      ? `<defs><filter id="src-glow" x="-50%" y="-50%" width="200%" height="200%">`
+      + `<feGaussianBlur stdDeviation="3"/></filter></defs>`
+      : '';
+    const stroke = 2 + 3 * t;
+    const badge = `${(t * 100).toFixed(0)}%`;
+    let g = glowDef + `<g class="src-preview" pointer-events="none">`;
+    if (preview.kind === 'sink') {
+      // Ring grows with drag length; no direction.
+      const radius = 12 + 28 * t;
+      g += `<circle cx="${sx}" cy="${sy}" r="${radius.toFixed(1)}" `
+        +  `fill="rgba(0,0,0,0.25)" stroke="${colour}" `
+        +  `stroke-width="${stroke.toFixed(2)}" stroke-dasharray="4 3"${filter}/>`
+        +  `<line x1="${(sx - 6).toFixed(1)}" y1="${sy}" `
+        +  `x2="${(sx + 6).toFixed(1)}" y2="${sy}" `
+        +  `stroke="rgba(255,255,255,0.95)" stroke-width="2" stroke-linecap="round"/>`;
+    } else {
+      // Source: arrow from start → current pointer in screen space.
+      g += `<circle cx="${sx}" cy="${sy}" r="9" fill="rgba(255,255,255,0.18)" `
+        +  `stroke="${colour}" stroke-width="${stroke.toFixed(2)}"${filter}/>`;
+      if (screenLen > 1) {
+        g += `<line x1="${sx}" y1="${sy}" x2="${cx.toFixed(1)}" y2="${cy.toFixed(1)}" `
+          +  `stroke="${colour}" stroke-width="${stroke.toFixed(2)}" `
+          +  `marker-end="url(#src-arrow)"${filter}/>`;
+      }
+    }
+    // Numeric badge above the start point so it never sits under the
+    // user's finger. Two-text-element trick (dark halo + bright fill)
+    // for legibility on both light and dark dye.
+    const tx = sx;
+    const ty = sy - (preview.kind === 'sink' ? (16 + 28 * t) : 22);
+    g += `<text x="${tx}" y="${ty.toFixed(1)}" text-anchor="middle" `
+      +  `font-family="system-ui, -apple-system, sans-serif" `
+      +  `font-size="13" font-weight="600" `
+      +  `stroke="rgba(0,0,0,0.75)" stroke-width="3" paint-order="stroke" `
+      +  `fill="${colour}">${badge}</text>`;
+    g += `</g>`;
+    return g;
   }
 
 

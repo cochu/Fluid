@@ -140,6 +140,133 @@ test('persistence', 'PERSISTED_CONFIG_KEYS includes recent additions', () => {
 });
 
 /* ────────────────────────────────────────────────────────────────────── */
+/*  Suite: Source/sink force gauge                                        */
+/* ────────────────────────────────────────────────────────────────────── */
+
+import {
+  forceGradient, dragLengthToT, sinkRateToT, tToSinkRate,
+  sourceMagnitudeToT, SINK_RATE_MIN, SINK_RATE_MAX, DRAG_T_FULL_FRACTION,
+  UI,
+} from '../src/ui/UI.js';
+
+test('sources', 'forceGradient hits expected stops', () => {
+  const cool = forceGradient(0);
+  const mid  = forceGradient(0.5);
+  const warm = forceGradient(1);
+  if (cool !== 'rgb(80, 140, 255)') throw new Error(`cool stop wrong: ${cool}`);
+  if (mid  !== 'rgb(80, 230, 180)') throw new Error(`mid stop wrong: ${mid}`);
+  if (warm !== 'rgb(255, 110, 80)') throw new Error(`warm stop wrong: ${warm}`);
+  // Out-of-range inputs must clamp, not blow up.
+  if (forceGradient(-1) !== cool) throw new Error('negative t should clamp to 0');
+  if (forceGradient( 9) !== warm) throw new Error('overflow t should clamp to 1');
+});
+
+test('sources', 'dragLengthToT saturates at DRAG_T_FULL_FRACTION of min(W,H)', () => {
+  const w = 1600, h = 800; // landscape, min = 800
+  const knee = h * DRAG_T_FULL_FRACTION;
+  if (Math.abs(dragLengthToT(0, w, h)) > 1e-9) throw new Error('zero drag should map to 0');
+  const half = dragLengthToT(knee * 0.5, w, h);
+  if (Math.abs(half - 0.5) > 1e-6) throw new Error(`half drag should map to 0.5, got ${half}`);
+  if (dragLengthToT(knee, w, h) !== 1)        throw new Error('knee drag should map to exactly 1');
+  if (dragLengthToT(knee * 4, w, h) !== 1)    throw new Error('over-knee drag should saturate at 1');
+});
+
+test('sources', 'sinkRateToT and tToSinkRate are inverses across the range', () => {
+  for (let i = 0; i <= 10; i++) {
+    const t  = i / 10;
+    const r  = tToSinkRate(t);
+    const t2 = sinkRateToT(r);
+    if (Math.abs(t - t2) > 1e-9) throw new Error(`roundtrip drift at t=${t}: got ${t2}`);
+  }
+  if (tToSinkRate(0)  !== SINK_RATE_MIN) throw new Error('t=0 should give SINK_RATE_MIN');
+  if (tToSinkRate(1)  !== SINK_RATE_MAX) throw new Error('t=1 should give SINK_RATE_MAX');
+  // Legacy rate=1 should land in cool half (between MIN and mid-range).
+  const tLegacy = sinkRateToT(1);
+  if (!(tLegacy > 0 && tLegacy < 0.5)) throw new Error(`legacy rate=1 should map to cool half, got ${tLegacy}`);
+});
+
+test('sources', 'sourceMagnitudeToT clamps at zero and saturates at the full-scale anchor', () => {
+  if (sourceMagnitudeToT(-3) !== 0) throw new Error('negative magnitude must clamp to 0');
+  if (sourceMagnitudeToT(0)  !== 0) throw new Error('zero magnitude must yield 0');
+  if (sourceMagnitudeToT(99) !== 1) throw new Error('huge magnitude must saturate at 1');
+});
+
+test('sources', '_renderSources arrow direction is in screen space (aspect-ratio-correct)', () => {
+  // Build a minimal DOM scaffold that UI._renderSources expects.
+  const canvas = document.createElement('div');
+  canvas.id = 'canvas';
+  // Deliberately non-square so a UV-space normalisation would tilt the arrow.
+  Object.defineProperty(canvas, 'clientWidth',  { value: 1600 });
+  Object.defineProperty(canvas, 'clientHeight', { value: 400  });
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.id = 'sources-overlay';
+  document.body.appendChild(canvas);
+  document.body.appendChild(svg);
+
+  // Build a minimal UI without running its full constructor (which
+  // expects every button/slider in index.html). We only need
+  // _renderSources, which uses _config and _svgOverlay.
+  const ui = Object.create(UI.prototype);
+  ui._config = {
+    SOURCES: [
+      // Source at centre, dragged exactly 45° down-right in *screen*
+      // pixels. With w==1600, h==400 a UV displacement (0.1, -0.1)
+      // covers (160, 40) px ≈ +14° from horizontal — clearly NOT 45°,
+      // which proves we must not normalise in UV.
+      // To get a screen-space 45° down-right vector we set
+      // dx_uv = 0.1, dy_uv = -0.4 → screen = (160, 160).
+      { x: 0.5, y: 0.5, dx: 0.1, dy: -0.4, color: { r: 1, g: 1, b: 1 }, rate: 1 },
+    ],
+  };
+  ui._previewState = null;
+  ui._svgOverlay = svg;
+  ui._cb = {};
+  ui._renderSources();
+
+  const line = svg.querySelector('g.src line');
+  if (!line) throw new Error('no arrow line rendered');
+  const x1 = parseFloat(line.getAttribute('x1'));
+  const y1 = parseFloat(line.getAttribute('y1'));
+  const x2 = parseFloat(line.getAttribute('x2'));
+  const y2 = parseFloat(line.getAttribute('y2'));
+  // Arrow centre starts at (800, 200). The drawn vector must point
+  // 45° down-right (dx_screen > 0, dy_screen > 0, |dx| ≈ |dy|).
+  const vx = x2 - x1;
+  const vy = y2 - y1;
+  if (!(vx > 0 && vy > 0)) throw new Error(`arrow should point down-right, got (${vx}, ${vy})`);
+  const angle = Math.atan2(vy, vx) * 180 / Math.PI;
+  // Angle should be within a couple of degrees of 45°. The OLD UV-space
+  // normaliser would produce ~76°, which would fail this test.
+  if (Math.abs(angle - 45) > 3) {
+    throw new Error(`arrow angle should be ~45°, got ${angle.toFixed(1)}°`);
+  }
+
+  // Cleanup so subsequent tests don't see the stale DOM nodes.
+  canvas.remove(); svg.remove();
+});
+
+test('sources', '_previewSVG renders sink ring without a directional arrow', () => {
+  const ui = Object.create(UI.prototype);
+  const html = ui._previewSVG(
+    { kind: 'sink', startUV: { x: 0.5, y: 0.5 }, currentUV: { x: 0.7, y: 0.3 } },
+    1000, 1000,
+  );
+  if (!/circle /.test(html)) throw new Error('sink preview should contain a circle');
+  if (/marker-end/.test(html))   throw new Error('sink preview must not draw a directional arrow');
+  if (!/text /.test(html))       throw new Error('sink preview should contain the numeric badge');
+});
+
+test('sources', '_previewSVG renders source preview with arrow + badge', () => {
+  const ui = Object.create(UI.prototype);
+  const html = ui._previewSVG(
+    { kind: 'source', startUV: { x: 0.5, y: 0.5 }, currentUV: { x: 0.6, y: 0.4 } },
+    1000, 1000,
+  );
+  if (!/marker-end/.test(html)) throw new Error('source preview should draw an arrow');
+  if (!/text /.test(html))      throw new Error('source preview should contain the numeric badge');
+});
+
+/* ────────────────────────────────────────────────────────────────────── */
 /*  Suite: Simulation smoke (real WebGL2)                                 */
 /* ────────────────────────────────────────────────────────────────────── */
 
