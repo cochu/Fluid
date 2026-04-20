@@ -39,6 +39,15 @@
           <button id="btn-source" class="ui-btn" data-tip="Place permanent source (drag = direction, tap to remove)" aria-label="Place source">💠</button>
           <button id="btn-sink"   class="ui-btn" data-tip="Place sink — drains dye where you tap (tap marker to remove)" aria-label="Place sink">🕳️</button>
         </div>
+        <!-- Brush slider sits directly under the obstacle button row so the
+             spatial link with 🧱 / 🩹 / ↶ / 🧽 is obvious. Hidden until
+             obstacle mode is on (progressive disclosure per Marcus). -->
+        <div class="ui-more-row ui-more-sliders ui-brush-row" id="slider-group-brush" hidden>
+          <div class="ui-slider-group">
+            <label for="slider-brush">🧱 Brush</label>
+            <input type="range" id="slider-brush" min="0" max="100" value="35" step="1" data-tip="Obstacle brush size" aria-label="Obstacle brush size">
+          </div>
+        </div>
         <div class="ui-more-row">
           <button id="btn-hq-advect" class="ui-btn active" data-tip="Dye advection: MacCormack (high quality)" aria-label="Dye advection scheme">⋍</button>
           <button id="btn-noslip" class="ui-btn" data-tip="Wall boundary: free-slip (fluid slides along edges)" aria-label="Wall boundary condition">⇌</button>
@@ -49,10 +58,6 @@
           <div class="ui-slider-group">
             <label for="slider-viscosity">Viscosity</label>
             <input type="range" id="slider-viscosity" min="0" max="100" value="0" step="1" data-tip="Honey-like thickness" aria-label="Viscosity">
-          </div>
-          <div class="ui-slider-group" id="slider-group-brush" hidden>
-            <label for="slider-brush">Brush</label>
-            <input type="range" id="slider-brush" min="0" max="100" value="35" step="1" data-tip="Obstacle brush size" aria-label="Brush size">
           </div>
         </div>
       </div>
