@@ -182,12 +182,12 @@ export function forceGradient(t) {
   ];
   const seg = c < 0.5 ? 0 : 1;
   const u   = c < 0.5 ? c * 2 : (c - 0.5) * 2;
-  const a   = stops[seg];
-  const b   = stops[seg + 1];
-  const r = Math.round(a[0] + (b[0] - a[0]) * u);
-  const g = Math.round(a[1] + (b[1] - a[1]) * u);
-  const bl= Math.round(a[2] + (b[2] - a[2]) * u);
-  return `rgb(${r}, ${g}, ${bl})`;
+  const lo  = stops[seg];
+  const hi  = stops[seg + 1];
+  const r = Math.round(lo[0] + (hi[0] - lo[0]) * u);
+  const g = Math.round(lo[1] + (hi[1] - lo[1]) * u);
+  const b = Math.round(lo[2] + (hi[2] - lo[2]) * u);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -722,9 +722,10 @@ export class UI {
 
     let html = '';
     if (visible) {
-      // Single arrow marker — recoloured per-line via stroke; the marker
-      // path picks up `context-stroke` so it inherits the line colour
-      // (works in all evergreen browsers + Safari 16+).
+      // The arrow marker is referenced by both the permanent source
+      // arrows AND the live source-preview arrow, so we always emit
+      // it whenever the overlay is visible at all (cheap defs block,
+      // browsers dedupe by id).
       html += `<defs><marker id="src-arrow" viewBox="0 0 10 10" refX="9" refY="5" `
            +  `markerWidth="6" markerHeight="6" orient="auto-start-reverse">`
            +  `<path d="M0,0 L10,5 L0,10 Z" fill="context-stroke"/></marker></defs>`;
