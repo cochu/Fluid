@@ -52,7 +52,18 @@ kick in and the user starts losing visual quality.
 Anything that touches rendering or input deserves an eyeball check before
 push. Mental checklist:
 
-- Default page loads, splats appear on click/touch, no console errors.
+- **0. `tests/test.html` is fully green** (open
+  `http://localhost:8080/tests/test.html`). The `boot` suite in particular
+  loads the real `index.html` inside an iframe and asserts no uncaught
+  script errors during module evaluation — it is the **only** check that
+  catches TDZ / bad-import regressions in `main.js` (see
+  [`gotchas.md#13`](gotchas.md#13-tdz-in-mainjs-boot--frozen-canvas-no-input-wired)).
+  This step is **mandatory** — even on "trivial" diffs — whenever the
+  change touches `src/main.js`, any of its imports, or adds a new
+  top-level `const`/`let` anywhere on the boot path.
+- Default page loads, splats appear on click/touch, **dev console is
+  empty of errors and warnings** (an empty console is the canary that
+  initially missed PR #8's TDZ — never skip this).
 - ◐ palette button cycles through all 7 modes; tooltip flashes the name.
 - ✦ particles toggle on/off without flicker.
 - 💧 drop button: tap = central confetti + tooltip; drag = dye trail.
