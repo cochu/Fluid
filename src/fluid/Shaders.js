@@ -644,10 +644,25 @@ void main() {
     }
 
     if (uShading) {
-        // Subtle shading: darken where velocity is low (looks like shadows)
-        float speed = length(texture(uVelocity, vUv).xy);
-        float shade = 1.0 - exp(-speed * 4.0) * 0.15;
-        c *= shade;
+        // Faux-3D dye shading. Treat dye luminance as a height field,
+        // compute a screen-space normal from the local gradient, and
+        // light it with a fixed virtual sun. Cosmetic only — does not
+        // touch the simulation. Strength scales with local intensity
+        // so flat dark regions don't grow phantom relief.
+        vec2 px = 1.0 / vec2(textureSize(uTexture, 0));
+        const vec3 W = vec3(0.299, 0.587, 0.114);
+        float hL = dot(texture(uTexture, vUv - vec2(px.x, 0.0)).rgb, W);
+        float hR = dot(texture(uTexture, vUv + vec2(px.x, 0.0)).rgb, W);
+        float hD = dot(texture(uTexture, vUv - vec2(0.0, px.y)).rgb, W);
+        float hU = dot(texture(uTexture, vUv + vec2(0.0, px.y)).rgb, W);
+        float lumC   = dot(c, W);
+        float relief = clamp(lumC * 8.0, 0.0, 4.0);
+        vec3 n = normalize(vec3((hL - hR) * relief, (hD - hU) * relief, 1.0));
+        vec3 L = normalize(vec3(0.45, 0.50, 0.85));
+        float diffuse = max(0.0, dot(n, L)) * 0.55 + 0.55;
+        vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
+        float spec    = pow(max(0.0, dot(n, H)), 32.0) * 0.30;
+        c = c * diffuse + vec3(spec);
     }
 
     c = toneMap(c * 1.2);

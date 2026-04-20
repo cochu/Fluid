@@ -61,6 +61,16 @@ export const CONFIG = {
   NO_SLIP_BOUNDARY: false,
 
   /**
+   * Faux-3D dye shading. When true, the display shader treats dye
+   * luminance as a height field, computes a screen-space normal from
+   * the local gradient, and lights it with a fixed virtual sun
+   * (Lambert + tight specular). Purely cosmetic — does not touch the
+   * simulation. Off by default because the flat look is already part
+   * of the project's identity; the user opts in via the ✦ button.
+   */
+  SHADING: false,
+
+  /**
    * Kinematic viscosity ν. 0 disables the implicit viscous diffusion pass
    * entirely (no cost). Typical visible range is roughly 0–0.5; the value
    * is multiplied by Δt · N² internally so the slider feel is independent

@@ -365,6 +365,19 @@ export class UI {
       if (btn) this._flashTip(btn, this._noSlipLabel(cfg.NO_SLIP_BOUNDARY));
     });
 
+    // Faux-3D dye shading toggle.
+    this._bind('btn-shading', 'click', () => {
+      cfg.SHADING = !cfg.SHADING;
+      this._toggle('btn-shading', cfg.SHADING);
+      const btn = document.getElementById('btn-shading');
+      if (btn) {
+        const label = `Faux-3D dye shading (${cfg.SHADING ? 'on' : 'off'})`;
+        btn.dataset.tip = label;
+        btn.setAttribute('aria-label', label);
+        this._flashTip(btn, label);
+      }
+    });
+
     this._bind('btn-pause', 'click', () => this._setPaused(!cfg.PAUSED));
 
     this._bind('btn-snapshot', 'click', () => this._cb.onSnapshot?.());
@@ -1202,6 +1215,7 @@ export class UI {
     if (cBtn) cBtn.dataset.tip = COLOR_MODE_LABELS[mode] || mode;
     this._refreshAdvectionButton();
     this._refreshNoSlipButton();
+    this._toggle('btn-shading',   this._config.SHADING);
     this._toggle('btn-pause',     this._config.PAUSED);
     this._toggle('btn-tilt',      this._config.TILT_REACTIVE);
     this._toggle('btn-midi',      this._config.MIDI_REACTIVE);
