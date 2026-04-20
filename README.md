@@ -93,9 +93,14 @@ Fluid/
     │   └── InputHandler.js     Pointer Events → splat calls
     ├── audio/
     │   └── AudioReactivity.js  Mic → bass-band beat detector → radial splats
+    ├── recording/
+    │   └── Recorder.js         canvas.captureStream + MediaRecorder → WebM
     └── ui/
         └── UI.js               DOM wiring for controls
 ```
+
+A zero-dependency in-browser test harness lives under `tests/`
+(see the **Testing** section below).
 
 ### Data flow each frame
 
@@ -165,7 +170,7 @@ Fluid ships as an installable PWA:
   (HTML, CSS, every ES-module source, the manifest and the icon) and then serves
   same-origin GET requests using a stale-while-revalidate strategy. Navigations
   fall back to cached `index.html` when the network is offline.
-- The cache name is **versioned** (`fluid-v1`) — bumping it invalidates the old
+- The cache name is **versioned** (`fluid-v2`) — bumping it invalidates the old
   shell on the next visit.
 - Registration is guarded so it's a no-op on `file://` and other insecure origins.
 
@@ -193,10 +198,13 @@ network disabled — the simulation will start exactly the same way.
 | **💠** | Place a permanent source — tap or drag on the canvas to set position + direction; click on the marker to remove it |
 | **⏸** | Pause / resume (also `Space`) |
 | **📷** | Save a PNG snapshot (also `S`) |
+| **⏺** | Start / stop **WebM video recording** of the canvas — second tap stops and downloads the file |
 | **Force** slider | Splat force magnitude (perceptually quadratic, 5 → 4500) |
 | **Persistence** slider | How long dye & velocity linger (smoothstep curve, 0.92 → 0.999) |
 | **Viscosity** slider | Honey-thick flow (cubic curve, 0 → 0.05) |
-| **≈** | Toggle high-quality (MacCormack) advection on the dye |
+| **≈ / ⋍ / ⩳** | Cycle dye advection scheme: standard semi-Lagrangian → MacCormack → BFECC (sharper filaments at the same GPU cost) |
+| **⇌ / ⊠** | Toggle wall boundary condition: free-slip (default — fluid slides) ↔ no-slip (fluid sticks, visible drag layer) |
+| **✦** | Toggle **faux-3D dye shading** — treats dye luminance as a height field and lights it with a virtual sun |
 | **⚡** | Performance mode — halves SIM/DYE resolution and lowers iteration counts |
 
 ---
@@ -218,10 +226,11 @@ network disabled — the simulation will start exactly the same way.
 
 ## Benchmarking
 
-A self-contained benchmark page lives at `bench/bench.html`. It runs four
-deterministic scenarios (high-quality vs. perf mode, ν=0 vs. ν=0.05) with a
-seeded splat sequence, then reports mean / p95 frame time and the divergence
-L2 residual after the pressure solve.
+A self-contained benchmark page lives at `bench/bench.html`. It runs eight
+deterministic scenarios — the original four (HQ on/off, viscous, perf-mode)
+plus four feature scenarios (BFECC dye, no-slip walls, faux-3D shading on,
+no bloom) — with a seeded splat sequence, then reports mean / p95 frame
+time and the divergence L2 residual after the pressure solve.
 
 ```bash
 python3 -m http.server 8080
@@ -231,8 +240,32 @@ http://localhost:8080/bench/bench.html
 # exposed on window.__BENCH_RESULT__ for headless drivers.
 ```
 
+**Download / Copy JSON** buttons appear after a run completes; the dump
+includes `ts`, `ua`, `build` (BUILD_VERSION SHA) and the per-scenario
+timings, ready to paste into a PR comment.
+
 Use it to compare branches before/after tweaks to the solver, precision
 settings, or Jacobi iteration count.
+
+---
+
+## Testing
+
+A zero-dependency in-browser test harness lives at `tests/test.html`. Open
+it from the same local HTTP server — each test is rendered as a row, green
+or red, with the failure reason inline. The harness covers:
+
+- **Structural** — required CONFIG keys exist, `DYE_ADVECTION` default is
+  one of the known schemes.
+- **Pure-logic** — palettes pre-multiply by `DYE_BRIGHTNESS`, persistence
+  enum guards reject tampered values, snapshot ↔ applyToConfig roundtrip.
+- **Sim smoke** — instantiate `FluidSimulation` on a real WebGL2 context,
+  step 30 frames with a splat, assert non-zero pixels; idle 60 frames,
+  assert canvas stays dark (the trame-regression canary for golden rule
+  #1).
+
+Browsers without WebGL2 see the four `sim` rows skip in yellow rather
+than fail.
 
 ---
 
@@ -251,6 +284,11 @@ settings, or Jacobi iteration count.
   per-event force by `16.667ms / Δt`, so 120/240 Hz pointers no longer push
   several times harder than 60 Hz mice. The `Force` slider keeps its
   60 Hz semantics.
+- **Multi-pointer audit**: simultaneous touches now get distinct hues
+  (per-pointer slot offset on the colour wheel), source/sink placement
+  uses a per-`pointerId` drag map instead of a single global, and
+  `lostpointercapture` cleanup prevents stuck-pointer state when the OS
+  steals capture (back-gesture, scrollbar grab, modal popup).
 
 ---
 
@@ -271,11 +309,14 @@ Shipped:
 - [x] **Named scene presets** — Aurora, Ink, Lava, Smoke, … (combinations of palette + viscosity + bloom + vorticity)
 - [x] **Wallpaper mode** — UI-hidden screensaver with gentle auto-splats (🌙 button)
 - [x] **MIDI input** — 🎹 Web MIDI controller mapping (notes → chromatic spiral splats, CC → live tunables)
+- [x] **Painted sinks** — 🕳️ counterpart to sources, multiplicative dye drain via dedicated shader
+- [x] **BFECC dye advection** — third option in the ≈/⋍/⩳ tri-state for sharper filaments at the same GPU cost
+- [x] **No-slip wall boundary** — ⊠ toggle alongside the default free-slip; pairs with viscosity for honey-like wall drag
+- [x] **Faux-3D dye shading** — ✦ wires the previously dormant `CONFIG.SHADING` path into the display shader (height-from-luminance + Lambert + specular)
+- [x] **Animated export** — ⏺ records the live canvas to a WebM file via MediaRecorder (VP9 → VP8 → fallback)
+- [x] **Visual non-regression harness** — `tests/test.html` zero-dependency in-browser smoke runner (config / palettes / persistence / sim suites)
 
 In progress / planned:
 
-- [ ] **Animated export** — WebM / GIF capture for short loops (PNG snapshot is already shipped)
 - [ ] **WebGPU** migration *(see [`docs/webgpu-rnd.md`](docs/webgpu-rnd.md) — R&D notes; capability is probed at startup, full port pending)*
-- [ ] **Painted sinks** — counterpart to sources, drain dye + velocity
-- [ ] **Volumetric / faux-3D dye shading** — wire the dormant `CONFIG.SHADING` path into the display shader
-- [ ] **Visual non-regression harness** — scripted scenarios + deterministic frame hashes
+- [ ] **Headless CI test wrapper** — Playwright script under `tools/` that opens `tests/test.html` and exits non-zero on red rows
