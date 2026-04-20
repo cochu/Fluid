@@ -82,12 +82,23 @@ test('palettes', 'paletteAccent returns a finite unit-ish colour', () => {
   }
 });
 
-test('palettes', 'nextMode cycles the seven palette modes', () => {
+test('palettes', 'nextMode cycles the seven palette modes in order', () => {
   const modes = ['rainbow', 'cycle', 'ocean', 'sunset', 'magma', 'forest', 'mono'];
   let m = modes[0];
-  const seen = new Set([m]);
-  for (let i = 0; i < modes.length - 1; i++) { m = nextMode(m); seen.add(m); }
-  if (seen.size !== modes.length) throw new Error(`cycle covered ${seen.size} of ${modes.length}`);
+  const visited = [m];
+  for (let i = 0; i < modes.length; i++) { m = nextMode(m); visited.push(m); }
+  // After modes.length steps we should have come full circle: 8 visits,
+  // first and last identical, middle six covering the remaining modes.
+  if (visited.length !== modes.length + 1) throw new Error('wrong visit count');
+  if (visited[visited.length - 1] !== visited[0]) {
+    throw new Error(`cycle did not close: started ${visited[0]}, ended ${visited[visited.length - 1]}`);
+  }
+  // The set of distinct entries must equal the set of declared modes.
+  const seen = new Set(visited);
+  for (const expected of modes) {
+    if (!seen.has(expected)) throw new Error(`mode missing from cycle: ${expected}`);
+  }
+  if (seen.size !== modes.length) throw new Error(`unexpected extra modes: ${[...seen].filter(x => !modes.includes(x))}`);
 });
 
 /* ────────────────────────────────────────────────────────────────────── */

@@ -332,6 +332,11 @@ vec4 bilerp(sampler2D sam, vec2 uv, vec2 tsize) {
 }
 
 void main() {
+    // Velocity is sampled from the velocity grid (uTexelSize), but the
+    // trace-back coord lives in the dye grid's UV space — so the clamp
+    // bound below uses uDyeTexelSize, not uTexelSize. Asymmetric on
+    // purpose: when SIM_RESOLUTION ≠ DYE_RESOLUTION (the default) the
+    // two grids have different texel sizes.
     vec2 vel   = bilerp(uVelocity, vUv, uTexelSize).xy;
     vec2 coord = vUv - uDt * vel;
     coord      = clamp(coord, 0.5 * uDyeTexelSize, 1.0 - 0.5 * uDyeTexelSize);
