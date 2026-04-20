@@ -226,6 +226,61 @@ html, body {
 
 .ui-subpanel[hidden] { display: none; }
 
+/* ============================================================
+   "More" popover — secondary controls collapsed off the primary
+   row to keep the bottom chrome compact on phones. Floats above
+   the primary panel so toggling it doesn't reflow the row the
+   user just tapped (Marcus: trigger position must stay stable).
+   On wider viewports it still floats above; the primary row was
+   already wrap-friendly so no media query is needed.
+   ============================================================ */
+.ui-more-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 18px;
+  padding: 10px 12px;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(92vw, 420px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  z-index: 1;
+}
+.ui-more-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.ui-more-sliders {
+  /* Sliders need a bit more breathing room than icon rows. */
+  padding-top: 2px;
+}
+
+/* Trigger active-state indicator: a small dot in the top-right corner
+   when any control inside #more-panel is currently in an "on" mode
+   (obstacle / source / sink / perf / midi / tilt / shading / etc.).
+   Marcus's "modes hidden behind a fold must still announce themselves"
+   rule — without this dot the user can forget they're in obstacle mode. */
+#btn-more.has-active::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(120, 200, 255);
+  box-shadow: 0 0 6px rgba(120, 200, 255, 0.85);
+  pointer-events: none;
+}
+
 .ui-subpanel-row {
   display: flex;
   align-items: center;

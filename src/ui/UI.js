@@ -395,6 +395,64 @@ export class UI {
     this._bindShareButton();
     this._bindResetLongPress();
     this._bindWallpaperButton();
+    this._bindMoreButton();
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+     "More" popover (collapses secondary controls)
+     --------------------------------------------------------------------
+     Owns: the ☰ trigger, open/close state, outside-tap dismiss,
+     Escape-to-close, and the active-mode dot on the trigger. The dot
+     is driven by a MutationObserver so we don't have to plumb a
+     refresh call into every contained-mode toggle (Maya: keep the
+     coupling local to this method).
+     ────────────────────────────────────────────────────────────────── */
+  _bindMoreButton() {
+    const btn   = document.getElementById('btn-more');
+    const panel = document.getElementById('more-panel');
+    if (!btn || !panel) return;
+
+    const setOpen = (open) => {
+      panel.hidden = !open;
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      btn.classList.toggle('active', open);
+    };
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setOpen(panel.hidden);
+    });
+
+    // Outside-tap dismiss — but keep the panel open if the user clicks
+    // inside it (so toggling a contained button doesn't immediately
+    // collapse the panel they're working in).
+    document.addEventListener('pointerdown', (e) => {
+      if (panel.hidden) return;
+      if (panel.contains(e.target) || btn.contains(e.target)) return;
+      setOpen(false);
+    }, true);
+
+    // Escape closes the popover.
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !panel.hidden) setOpen(false);
+    });
+
+    // Active-mode indicator — refresh whenever any contained button
+    // gains/loses the .active class. Covers obstacle / source / sink /
+    // erase / perf / midi / tilt / shading without needing each of
+    // their toggles to call us back. We exclude #btn-hq-advect because
+    // its `.active` state reflects MacCormack/BFECC — both of which are
+    // baseline (MacCormack is the default scheme), so lighting the
+    // dot for them would be permanent noise rather than a signal.
+    const refresh = () => {
+      const anyActive = !!panel.querySelector(
+        '.ui-btn.active:not(#btn-hq-advect), .ui-btn.perf-mode'
+      );
+      btn.classList.toggle('has-active', anyActive);
+    };
+    const obs = new MutationObserver(refresh);
+    obs.observe(panel, { attributes: true, attributeFilter: ['class'], subtree: true });
+    refresh();
   }
 
   /* ──────────────────────────────────────────────────────────────────
