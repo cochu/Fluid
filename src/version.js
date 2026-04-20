@@ -10,4 +10,4 @@
  * The string is intentionally short — the UI layer prefixes it with
  * "v" and shows it as a discreet badge top-left.
  */
-export const BUILD_VERSION = '46ad27a-2026-04-20';
+export const BUILD_VERSION = '36ab1a9-2026-04-20';

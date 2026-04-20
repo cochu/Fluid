@@ -27,6 +27,8 @@ window.__BENCH_RESULT__ for headless drivers.</div>
       <div style="margin-top:8px;">
         <button id="btn-run">Run full benchmark</button>
         <button id="btn-quick">Quick (3s)</button>
+        <button id="btn-download" disabled>Download JSON</button>
+        <button id="btn-copy" disabled>Copy JSON</button>
       </div>
       <pre id="log"></pre>
     </div>
@@ -36,6 +38,8 @@ window.__BENCH_RESULT__ for headless drivers.</div>
     import { CONFIG }            from '../src/config.js';
     import { getWebGL2Context }  from '../src/webgl/GLUtils.js';
     import { FluidSimulation }   from '../src/fluid/FluidSimulation.js';
+    import { BUILD_VERSION }     from '../src/version.js';
+    window.__BUILD_VERSION__ = BUILD_VERSION;
 
     /* ───────────────────────── Setup ───────────────────────── */
 
@@ -154,17 +158,32 @@ window.__BENCH_RESULT__ for headless drivers.</div>
     async function runAll(quick = false) {
       logEl.textContent = '';
       stat.textContent = 'Running…';
+      document.getElementById('btn-download').disabled = true;
+      document.getElementById('btn-copy').disabled     = true;
 
       const F = quick ? 60 : 240;
       const scenarios = [
-        { name: 'baseline (HQ on, ν=0)',   frames: F, overrides: { HIGH_QUALITY_ADVECTION: true,  VISCOSITY: 0 },     measureResidual: true },
-        { name: 'plain SL  (HQ off, ν=0)', frames: F, overrides: { HIGH_QUALITY_ADVECTION: false, VISCOSITY: 0 },     measureResidual: true },
-        { name: 'viscous   (ν=0.05)',      frames: F, overrides: { HIGH_QUALITY_ADVECTION: true,  VISCOSITY: 0.05 },  measureResidual: true },
+        // Solver-quality scenarios — keep the original four for direct
+        // comparability with historical bench JSON.
+        { name: 'baseline (HQ on, ν=0)',   frames: F, overrides: { HIGH_QUALITY_ADVECTION: true,  DYE_ADVECTION: 'maccormack', VISCOSITY: 0 },     measureResidual: true },
+        { name: 'plain SL  (HQ off, ν=0)', frames: F, overrides: { HIGH_QUALITY_ADVECTION: false, DYE_ADVECTION: 'standard',   VISCOSITY: 0 },     measureResidual: true },
+        { name: 'viscous   (ν=0.05)',      frames: F, overrides: { HIGH_QUALITY_ADVECTION: true,  DYE_ADVECTION: 'maccormack', VISCOSITY: 0.05 },  measureResidual: true },
         { name: 'perf mode (sim 64)',      frames: F, overrides: { SIM_RESOLUTION: 64, DYE_RESOLUTION: 256, PRESSURE_ITERATIONS: 10 }, measureResidual: false },
+        // New-feature scenarios (added in the BFECC / no-slip / shading
+        // / faux-3D rounds). Each isolates a single knob against the
+        // matching baseline so cost can be read directly.
+        { name: 'bfecc dye  (HQ on, ν=0)', frames: F, overrides: { HIGH_QUALITY_ADVECTION: true, DYE_ADVECTION: 'bfecc',       VISCOSITY: 0 },     measureResidual: true },
+        { name: 'no-slip walls',           frames: F, overrides: { HIGH_QUALITY_ADVECTION: true, DYE_ADVECTION: 'maccormack',  VISCOSITY: 0, NO_SLIP_BOUNDARY: true }, measureResidual: true },
+        { name: 'faux-3D shading on',      frames: F, overrides: { HIGH_QUALITY_ADVECTION: true, DYE_ADVECTION: 'maccormack',  VISCOSITY: 0, SHADING: true }, measureResidual: false },
+        { name: 'no bloom',                frames: F, overrides: { HIGH_QUALITY_ADVECTION: true, DYE_ADVECTION: 'maccormack',  VISCOSITY: 0, BLOOM: false }, measureResidual: false },
       ];
 
       const results = [];
-      for (const sc of scenarios) {
+      for (let i = 0; i < scenarios.length; i++) {
+        const sc = scenarios[i];
+        stat.textContent = `Running scenario ${i + 1}/${scenarios.length}: ${sc.name}`;
+        // Yield a frame so the DOM repaints with the progress text.
+        await new Promise(r => requestAnimationFrame(r));
         // eslint-disable-next-line no-await-in-loop
         const r = await runScenario(sc);
         results.push(r);
@@ -180,15 +199,46 @@ window.__BENCH_RESULT__ for headless drivers.</div>
       window.__BENCH_RESULT__ = {
         ts: new Date().toISOString(),
         ua: navigator.userAgent,
+        // Build identifier helps correlate a JSON dump with a specific
+        // commit when reviewers paste results into PRs.
+        build: (window.__BUILD_VERSION__ || 'dev'),
         results,
       };
       stat.textContent = 'Done. window.__BENCH_RESULT__ ready.';
+      document.getElementById('btn-download').disabled = false;
+      document.getElementById('btn-copy').disabled     = false;
       log('\nJSON:');
       log(JSON.stringify(window.__BENCH_RESULT__, null, 2));
     }
 
     document.getElementById('btn-run').addEventListener('click',  () => runAll(false));
     document.getElementById('btn-quick').addEventListener('click', () => runAll(true));
+
+    // JSON export — download the latest result as a timestamped file.
+    document.getElementById('btn-download').addEventListener('click', () => {
+      if (!window.__BENCH_RESULT__) return;
+      const blob = new Blob([JSON.stringify(window.__BENCH_RESULT__, null, 2)],
+                            { type: 'application/json' });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `fluid-bench-${stamp}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+
+    // Copy to clipboard — useful for pasting into PR comments. Falls
+    // back to a select-and-copy hint if the Clipboard API is gated.
+    document.getElementById('btn-copy').addEventListener('click', async () => {
+      if (!window.__BENCH_RESULT__) return;
+      const txt = JSON.stringify(window.__BENCH_RESULT__, null, 2);
+      try {
+        await navigator.clipboard.writeText(txt);
+        stat.textContent = 'JSON copied to clipboard.';
+      } catch (_) {
+        stat.textContent = 'Clipboard blocked — select the JSON below and copy manually.';
+      }
+    });
 
     // Headless auto-run: append ?auto=1 (or ?auto=quick) to launch immediately.
     const params = new URLSearchParams(location.search);
