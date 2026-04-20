@@ -231,14 +231,13 @@ html, body {
    row to keep the bottom chrome compact on phones. Floats above
    the primary panel so toggling it doesn't reflow the row the
    user just tapped (Marcus: trigger position must stay stable).
-   On wider viewports it still floats above; the primary row was
-   already wrap-friendly so no media query is needed.
+   Right-aligned so the popover sits above the ☰ trigger button,
+   reinforcing the spatial relationship between button and panel.
    ============================================================ */
 .ui-more-panel {
   position: absolute;
   bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
+  right: 0;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
