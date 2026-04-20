@@ -46,7 +46,7 @@
         </div>
       </div>
       <button id="btn-midi" class="ui-btn" data-tip="MIDI input (note → splat, modwheel → force)" aria-label="MIDI input">🎹</button>
-      <button id="btn-tilt" class="ui-btn" data-tip="Tilt to stir (uses device motion)" aria-label="Tilt reactivity">🧭</button>
+      <button id="btn-tilt" class="ui-btn" data-tip="Tilt-stir (tilt phone to move fluid)" aria-label="Tilt-stir (tilt phone to move fluid)">🧭</button>
       <button id="btn-obstacles" class="ui-btn" data-tip="Paint obstacles (drag on canvas)" aria-label="Paint obstacles">🧱</button>
       <button id="btn-erase" class="ui-btn" data-tip="Erase obstacles" aria-label="Erase obstacles">🩹</button>
       <button id="btn-undo" class="ui-btn" data-tip="Undo last obstacle stroke" aria-label="Undo obstacle stroke" disabled>↶</button>
@@ -93,6 +93,18 @@
   </div>
   <div id="snapshot-flash" aria-hidden="true"></div>
   <svg id="sources-overlay" aria-hidden="true"></svg>
+
+  <div id="tilt-tutorial" hidden role="dialog" aria-modal="true" aria-labelledby="tilt-tutorial-title">
+    <div class="tilt-tutorial-card">
+      <h2 id="tilt-tutorial-title">Tilt to stir</h2>
+      <p>Tilt your device to push the fluid around.</p>
+      <p class="tilt-tutorial-note">iOS will ask for motion permission when you tap Allow.</p>
+      <div class="tilt-tutorial-actions">
+        <button type="button" id="tilt-tutorial-deny"  class="tilt-tutorial-btn tilt-tutorial-btn-secondary">Not now</button>
+        <button type="button" id="tilt-tutorial-allow" class="tilt-tutorial-btn tilt-tutorial-btn-primary">Allow</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="src/main.js"></script>
 

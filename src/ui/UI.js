@@ -694,12 +694,38 @@ export class UI {
   _bindTiltButton() {
     const btn = document.getElementById('btn-tilt');
     if (!btn) return;
+
+    // Capability gate: hide on devices without a coarse pointer (i.e.
+    // mouse-only desktops). Phones, tablets, and convertibles in tablet
+    // mode remain visible. DeviceMotionEvent technically exists in
+    // every modern browser but events never fire on hardware without an
+    // accelerometer, so the button would just look broken. Edge case
+    // (Chromebook with touchscreen but no accelerometer) is documented:
+    // they'll get a graceful permission-denied / no-motion path.
+    const isCoarse = (typeof window.matchMedia === 'function')
+                       && window.matchMedia('(pointer: coarse)').matches;
+    if (!isCoarse) {
+      btn.hidden = true;
+      // Bail before binding any listeners; the button will never appear
+      // on this device.
+      return;
+    }
+
+    const TUTORIAL_KEY = 'fluid:tilt-tutorial-seen';
+    // iOS Safari is the only platform that exposes
+    // DeviceMotionEvent.requestPermission; everywhere else, motion fires
+    // freely once the user grants the page sensor access (or implicitly
+    // on Android Chrome).
+    const needsIOSPermission = (typeof DeviceMotionEvent !== 'undefined')
+                                && (typeof DeviceMotionEvent.requestPermission === 'function');
     let busy = false;
-    btn.addEventListener('click', async () => {
+
+    /** Run the actual toggle. Caller is responsible for being inside a
+     *  fresh user gesture if iOS permission needs to be requested. */
+    const performToggle = async (want) => {
       if (busy) return;
       busy = true;
       btn.classList.remove('audio-denied');
-      const want = !this._config.TILT_REACTIVE;
       try {
         const actual = await this._cb.onToggleTilt?.(want);
         const on     = actual === undefined ? want : !!actual;
@@ -714,7 +740,77 @@ export class UI {
       } finally {
         busy = false;
       }
+    };
+
+    btn.addEventListener('click', (_e) => {
+      // Already on → just turn it off; no permission needed.
+      if (this._config.TILT_REACTIVE) {
+        performToggle(false);
+        return;
+      }
+      // Show the tutorial modal once on iOS, before the first
+      // requestPermission call. The modal's Allow button is itself a
+      // fresh user gesture, so requestPermission inside its click
+      // handler is still allowed by the iOS gesture rules (gotcha #5).
+      let seen = false;
+      try { seen = !!localStorage.getItem(TUTORIAL_KEY); } catch (_) { /* private mode */ }
+      if (needsIOSPermission && !seen) {
+        this._showTiltTutorial(performToggle);
+        return;
+      }
+      // Non-iOS or already-seen → straight through.
+      performToggle(true);
     });
+  }
+
+  /**
+   * Show the iOS tilt onboarding modal. The Allow button click is the
+   * fresh user gesture that calls `performToggle(true)` — its inner
+   * `requestPermission()` call therefore satisfies the iOS gesture
+   * requirement without any awaits before it (gotcha #5).
+   *
+   * @param {(want:boolean)=>Promise<void>} performToggle
+   * @private
+   */
+  _showTiltTutorial(performToggle) {
+    const modal = document.getElementById('tilt-tutorial');
+    const allow = document.getElementById('tilt-tutorial-allow');
+    const deny  = document.getElementById('tilt-tutorial-deny');
+    if (!modal || !allow || !deny) {
+      // Fallback: if the markup is missing for any reason, just go
+      // straight to the permission flow rather than silently failing.
+      performToggle(true);
+      return;
+    }
+    const TUTORIAL_KEY = 'fluid:tilt-tutorial-seen';
+    const persistSeen = () => {
+      try { localStorage.setItem(TUTORIAL_KEY, '1'); } catch (_) { /* private mode */ }
+    };
+    const close = () => {
+      modal.classList.remove('visible');
+      // Wait for the fade-out before re-hiding so the transition runs.
+      setTimeout(() => { modal.hidden = true; }, 200);
+      // Detach handlers so a future open doesn't accumulate listeners.
+      allow.removeEventListener('click', onAllow);
+      deny .removeEventListener('click', onDeny);
+    };
+    const onAllow = () => {
+      persistSeen();
+      close();
+      // CRITICAL: this is the fresh gesture; performToggle(true) eventually
+      // calls AccelerometerInput.start() → DeviceMotionEvent.requestPermission().
+      performToggle(true);
+    };
+    const onDeny = () => {
+      persistSeen();          // Don't nag again on next session either.
+      close();
+    };
+    allow.addEventListener('click', onAllow);
+    deny .addEventListener('click', onDeny);
+    modal.hidden = false;
+    // Force layout flush so the .visible class triggers the transition.
+    void modal.offsetWidth;
+    modal.classList.add('visible');
   }
 
   /* ──────────────────────────────────────────────────────────────────

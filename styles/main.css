@@ -472,3 +472,97 @@ body.wallpaper-on #btn-wallpaper.active {
      active mode toggle, not just a stray emoji on a black canvas. */
   box-shadow: 0 0 18px rgba(170, 220, 255, 0.35);
 }
+
+/* ============================================================
+   Tilt onboarding modal (iOS first-tap gesture-chain bridge)
+   ============================================================ */
+#tilt-tutorial {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 1000;
+  opacity: 0;
+  transition: opacity 180ms ease-out;
+  pointer-events: none;
+}
+#tilt-tutorial[hidden] { display: none; }
+#tilt-tutorial.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tilt-tutorial-card {
+  background: rgba(20, 22, 28, 0.96);
+  color: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  padding: 22px 24px 18px;
+  max-width: 320px;
+  width: calc(100% - 48px);
+  font-family: system-ui, -apple-system, sans-serif;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  text-align: left;
+}
+
+.tilt-tutorial-card h2 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.tilt-tutorial-card p {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.tilt-tutorial-note {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.tilt-tutorial-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  justify-content: flex-end;
+}
+
+.tilt-tutorial-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 10px 18px;
+  min-height: 44px;
+  min-width: 84px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tilt-tutorial-btn-secondary {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.tilt-tutorial-btn-secondary:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tilt-tutorial-btn-primary {
+  background: rgba(120, 180, 255, 0.92);
+  color: #08111d;
+  font-weight: 600;
+}
+.tilt-tutorial-btn-primary:active {
+  background: rgba(95, 160, 240, 1);
+}
