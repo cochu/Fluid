@@ -34,8 +34,20 @@ export const CONFIG = {
    * Use second-order MacCormack/Selle advection (3-pass, with limiter)
    * instead of plain semi-Lagrangian. Significantly reduces numerical
    * diffusion at the cost of two extra advection passes per advected field.
+   *
+   * Kept as a backward-compat boolean alias of `DYE_ADVECTION === 'maccormack'`
+   * for old persisted snapshots; new code should read DYE_ADVECTION instead.
    */
   HIGH_QUALITY_ADVECTION: true,
+
+  /**
+   * Dye advection scheme — one of 'standard', 'maccormack', 'bfecc'.
+   * Velocity self-advection is always plain semi-Lagrangian (golden
+   * rule #1: MacCormack on the velocity path re-creates the
+   * zero-viscosity grid trame). BFECC and MacCormack share the first
+   * two passes, so the GPU cost is identical between them.
+   */
+  DYE_ADVECTION: 'maccormack',
 
   /**
    * Kinematic viscosity ν. 0 disables the implicit viscous diffusion pass

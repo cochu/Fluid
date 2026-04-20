@@ -41,6 +41,7 @@ export const PERSISTED_CONFIG_KEYS = Object.freeze([
   'BLOOM',
   'PARTICLES',
   'HIGH_QUALITY_ADVECTION',
+  'DYE_ADVECTION',
   'SPLAT_FORCE',
   'DENSITY_DISSIPATION',
   'VELOCITY_DISSIPATION',
@@ -136,6 +137,14 @@ export function applyToConfig(snap) {
           sanitised[ccNum] = v[cc];
         }
         CONFIG.MIDI_CC_MAP = sanitised;
+      }
+      continue;
+    }
+    if (k === 'DYE_ADVECTION') {
+      // Enum guard — reject anything outside the known set so a tampered
+      // snapshot can't put the dye loop in an "if (scheme === ...)" no-op.
+      if (v === 'standard' || v === 'maccormack' || v === 'bfecc') {
+        CONFIG.DYE_ADVECTION = v;
       }
       continue;
     }

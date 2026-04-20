@@ -341,9 +341,20 @@ export class UI {
       this._cb.onTogglePerfMode?.(newPerfMode);
     });
 
+    // Tri-state cycle: standard → MacCormack → BFECC → standard.
+    // The button glyph + tooltip update with each state so the user
+    // can see at a glance which scheme is active without opening
+    // devtools. We also keep HIGH_QUALITY_ADVECTION in lock-step for
+    // the legacy persistence/snapshot path.
     this._bind('btn-hq-advect', 'click', () => {
-      cfg.HIGH_QUALITY_ADVECTION = !cfg.HIGH_QUALITY_ADVECTION;
-      this._toggle('btn-hq-advect', cfg.HIGH_QUALITY_ADVECTION);
+      const order = ['standard', 'maccormack', 'bfecc'];
+      const i = Math.max(0, order.indexOf(cfg.DYE_ADVECTION || 'maccormack'));
+      const next = order[(i + 1) % order.length];
+      cfg.DYE_ADVECTION = next;
+      cfg.HIGH_QUALITY_ADVECTION = (next !== 'standard');
+      this._refreshAdvectionButton();
+      const btn = document.getElementById('btn-hq-advect');
+      if (btn) this._flashTip(btn, this._advectionLabel(next));
     });
 
     this._bind('btn-pause', 'click', () => this._setPaused(!cfg.PAUSED));
@@ -1142,6 +1153,24 @@ export class UI {
     const el = document.getElementById(id);
     if (el) el.classList.toggle('active', active);
   }
+  /** Tri-state advection button: glyph + tooltip + active class. */
+  _advectionLabel(scheme) {
+    if (scheme === 'bfecc')      return 'Dye advection: BFECC (sharpest)';
+    if (scheme === 'maccormack') return 'Dye advection: MacCormack (high quality)';
+    return 'Dye advection: standard (most diffuse)';
+  }
+  _refreshAdvectionButton() {
+    const btn = document.getElementById('btn-hq-advect');
+    if (!btn) return;
+    const scheme = this._config.DYE_ADVECTION
+                || (this._config.HIGH_QUALITY_ADVECTION ? 'maccormack' : 'standard');
+    // Glyph: ≈ for the diffuse standard scheme, ⋍ for MacCormack,
+    // ⩳ for the sharper BFECC. All three render in fallback fonts.
+    btn.textContent = scheme === 'standard' ? '≈' : (scheme === 'bfecc' ? '⩳' : '⋍');
+    btn.classList.toggle('active', scheme !== 'standard');
+    btn.dataset.tip = this._advectionLabel(scheme);
+    btn.setAttribute('aria-label', this._advectionLabel(scheme));
+  }
   _syncStates() {
     this._toggle('btn-particles', this._config.PARTICLES);
     this._toggle('btn-bloom',     this._config.BLOOM);
@@ -1149,7 +1178,7 @@ export class UI {
     this._toggle('btn-colorful',  mode !== 'mono');
     const cBtn = document.getElementById('btn-colorful');
     if (cBtn) cBtn.dataset.tip = COLOR_MODE_LABELS[mode] || mode;
-    this._toggle('btn-hq-advect', this._config.HIGH_QUALITY_ADVECTION);
+    this._refreshAdvectionButton();
     this._toggle('btn-pause',     this._config.PAUSED);
     this._toggle('btn-tilt',      this._config.TILT_REACTIVE);
     this._toggle('btn-midi',      this._config.MIDI_REACTIVE);

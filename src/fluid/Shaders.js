@@ -284,6 +284,82 @@ void main() {
 `;
 
 /**
+ * BFECC (Back and Forth Error Compensation and Correction) combiner.
+ *
+ * Shares passes 1 (forward advect) and 2 (reverse advect) with the
+ * MacCormack scheme — so toggling between MacCormack and BFECC requires
+ * no extra GPU work outside this final pass. Where MacCormack adds the
+ * error correction *to the forward-advected field at the destination
+ * pixel*, BFECC corrects the *source field* and re-advects it, which is
+ * less dissipative for sharp dye fronts (Selle 2008, §4.2).
+ *
+ * The bilinear sample of (φ + 0.5(φ - φ_back)) at the trace-back
+ * coordinate equals 1.5*bilerp(φ) - 0.5*bilerp(φ_back), so we never need
+ * to materialise the corrected source field into a fourth FBO.
+ *
+ * Same Selle limiter as MacCormack — clamp the result to the four raw
+ * neighbour values of φ at the trace-back position so the second-order
+ * correction can never introduce a new extremum (overshoot guard).
+ *
+ * Inputs:
+ *   uPhi      : original field φ_n (frozen)
+ *   uPhiBack  : φ_back = advect(advect(φ_n, +dt), -dt)  (the BFECC
+ *               error round-trip; written by passes 1+2)
+ *   uVelocity : carrier velocity (projected v for dye)
+ */
+export const BFECC_FRAG = /* glsl */`#version 300 es
+precision highp float;
+precision highp sampler2D;
+in vec2 vUv;
+uniform sampler2D uPhi;
+uniform sampler2D uPhiBack;
+uniform sampler2D uVelocity;
+uniform vec2  uTexelSize;
+uniform vec2  uDyeTexelSize;
+uniform float uDt;
+uniform float uDissipation;
+out vec4 fragColor;
+
+vec4 bilerp(sampler2D sam, vec2 uv, vec2 tsize) {
+    vec2 st  = uv / tsize - 0.5;
+    vec2 iuv = floor(st);
+    vec2 fuv = fract(st);
+    vec4 a = texture(sam, (iuv + vec2(0.5, 0.5)) * tsize);
+    vec4 b = texture(sam, (iuv + vec2(1.5, 0.5)) * tsize);
+    vec4 c = texture(sam, (iuv + vec2(0.5, 1.5)) * tsize);
+    vec4 d = texture(sam, (iuv + vec2(1.5, 1.5)) * tsize);
+    return mix(mix(a, b, fuv.x), mix(c, d, fuv.x), fuv.y);
+}
+
+void main() {
+    vec2 vel   = bilerp(uVelocity, vUv, uTexelSize).xy;
+    vec2 coord = vUv - uDt * vel;
+    coord      = clamp(coord, 0.5 * uDyeTexelSize, 1.0 - 0.5 * uDyeTexelSize);
+
+    // Sample (phi + 0.5*(phi - phi_back)) bilinearly at the trace-back
+    // position. Linearity of bilinear interp lets us combine the two
+    // taps into a single weighted expression — no fourth FBO needed.
+    vec4 phiSample     = bilerp(uPhi,     coord, uDyeTexelSize);
+    vec4 phiBackSample = bilerp(uPhiBack, coord, uDyeTexelSize);
+    vec4 corrected     = 1.5 * phiSample - 0.5 * phiBackSample;
+
+    // Selle limiter on the raw (un-filtered) neighbour stencil of phi
+    // at the trace-back position — bounds the correction to actual
+    // cell values so we never invent dye that wasn't there.
+    vec2 st  = coord / uDyeTexelSize - 0.5;
+    vec2 iuv = floor(st);
+    vec4 a = texture(uPhi, (iuv + vec2(0.5, 0.5)) * uDyeTexelSize);
+    vec4 b = texture(uPhi, (iuv + vec2(1.5, 0.5)) * uDyeTexelSize);
+    vec4 c = texture(uPhi, (iuv + vec2(0.5, 1.5)) * uDyeTexelSize);
+    vec4 d = texture(uPhi, (iuv + vec2(1.5, 1.5)) * uDyeTexelSize);
+    vec4 mn = min(min(a, b), min(c, d));
+    vec4 mx = max(max(a, b), max(c, d));
+
+    fragColor = uDissipation * clamp(corrected, mn, mx);
+}
+`;
+
+/**
  * Free-slip velocity boundary condition (Stam / Harris GPU Gems 1, ch. 38).
  *
  * On the 1-texel boundary ring: read the inner neighbour and write
