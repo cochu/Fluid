@@ -65,6 +65,11 @@ export class AudioReactivity {
 
     /** Resolved when audio is fully running, rejected on failure. */
     this._readyP = null;
+
+    /** The deviceId the most recent successful start() actually bound to.
+     *  Empty string means "browser default device". Read by the UI to
+     *  reconcile the device-picker selection after a fallback. */
+    this._activeDeviceId = '';
   }
 
   /** Whether audio capture is currently active. */
@@ -76,14 +81,19 @@ export class AudioReactivity {
    * Request the microphone and start the analyser. Safe to call multiple
    * times — subsequent calls are no-ops while already active.
    *
+   * @param {object} [opts]
+   * @param {string} [opts.deviceId] Preferred MediaDeviceInfo.deviceId; '' or
+   *        omitted = browser default. Falls back to default if the requested
+   *        device is no longer available.
    * @returns {Promise<void>} resolves once the analyser is wired up.
    */
-  async start() {
+  async start(opts = {}) {
     if (this.isActive) return;
     if (this._readyP) return this._readyP;
 
     this._aborted = false;
     const checkAbort = () => { if (this._aborted) throw new Error('audio start aborted'); };
+    const requestedDeviceId = (opts && typeof opts.deviceId === 'string') ? opts.deviceId : '';
 
     this._readyP = (async () => {
       if (!('mediaDevices' in navigator) || !navigator.mediaDevices.getUserMedia) {
@@ -93,14 +103,32 @@ export class AudioReactivity {
       if (!AC) throw new Error('Web Audio API not supported');
 
       // Disable any automatic processing — we WANT raw bass.
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl:  false,
-        },
-        video: false,
-      });
+      const audioConstraints = {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl:  false,
+      };
+      if (requestedDeviceId) {
+        // `exact` rejects if the device is gone, which we catch below
+        // and retry with the default device — better UX than a silent
+        // fall-through to whatever device the OS picks.
+        audioConstraints.deviceId = { exact: requestedDeviceId };
+      }
+      let stream;
+      let didFallback = false;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false });
+      } catch (err) {
+        if (requestedDeviceId && (err?.name === 'OverconstrainedError' || err?.name === 'NotFoundError')) {
+          // Persisted device is unplugged / revoked — retry with default.
+          console.warn('[Fluid] Audio device unavailable, falling back to default:', requestedDeviceId);
+          delete audioConstraints.deviceId;
+          stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false });
+          didFallback = true;
+        } else {
+          throw err;
+        }
+      }
       if (this._aborted) {
         // stop() ran while we were waiting for the mic — release the
         // freshly-granted track instead of installing it.
@@ -108,6 +136,15 @@ export class AudioReactivity {
         checkAbort();
       }
       this._stream = stream;
+      // Record the deviceId we actually got (post-fallback if applicable)
+      // so callers can sync their persisted state if the requested one
+      // was missing. Empty string means "browser default".
+      if (didFallback) {
+        this._activeDeviceId = '';
+      } else {
+        const settings = stream.getAudioTracks()[0]?.getSettings?.();
+        this._activeDeviceId = settings?.deviceId || requestedDeviceId || '';
+      }
 
       const ctx = new AC();
       if (ctx.state === 'suspended') {
@@ -142,6 +179,42 @@ export class AudioReactivity {
       this.stop();
       throw err;
     }
+  }
+
+  /**
+   * The deviceId actually in use for the active capture (post-fallback if
+   * the requested one was missing). Empty string when running on the
+   * browser default device or when audio is inactive.
+   */
+  get activeDeviceId() {
+    return this._activeDeviceId || '';
+  }
+
+  /**
+   * Switch to a different microphone. If audio is currently active this
+   * tears down the current graph and starts a fresh one bound to the new
+   * device. If inactive, the id is just remembered for the next start().
+   * Pass '' for the browser default device.
+   *
+   * @param {string} deviceId
+   * @returns {Promise<void>} resolves once the new graph is wired (or
+   *          rejects with the underlying getUserMedia error).
+   */
+  async setDeviceId(deviceId) {
+    const id = typeof deviceId === 'string' ? deviceId : '';
+    if (!this.isActive && !this._readyP) {
+      this._activeDeviceId = id;
+      return;
+    }
+    // Wait for any in-flight start to settle so we don't double-stop.
+    if (this._readyP) {
+      try { await this._readyP; } catch (_) { /* fall through to restart */ }
+    }
+    // No-op when the requested device is already the live one — saves
+    // a stop/start round-trip that would briefly mute the analyser.
+    if (this.isActive && id === this._activeDeviceId) return;
+    this.stop();
+    await this.start({ deviceId: id });
   }
 
   /** Stop capture, release the mic, free the audio graph. */

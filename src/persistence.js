@@ -56,6 +56,7 @@ export const PERSISTED_CONFIG_KEYS = Object.freeze([
   'AUDIO_SENSITIVITY',
   'AUDIO_MIDS_SENSITIVITY',
   'AUDIO_HIGHS_SENSITIVITY',
+  'AUDIO_DEVICE_ID',
 ]);
 
 /** Slider DOM ids whose `value` (0..100) is persisted alongside CONFIG so
@@ -66,6 +67,9 @@ export const PERSISTED_SLIDER_IDS = Object.freeze([
   'slider-dissipation',
   'slider-viscosity',
   'slider-brush',
+  'slider-audio-bass',
+  'slider-audio-mids',
+  'slider-audio-highs',
 ]);
 
 /** Maximum number of sources encoded into a share link. Persistence stores

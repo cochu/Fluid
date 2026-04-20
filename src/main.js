@@ -324,11 +324,27 @@ const ui = new UI(CONFIG, {
   },
   async onToggleAudio(want) {
     if (want) {
-      try { await audio.start(); return true; }
+      try {
+        await audio.start({ deviceId: CONFIG.AUDIO_DEVICE_ID || '' });
+        // If the requested device was unavailable and start() fell back
+        // to the browser default, sync CONFIG so the picker reflects
+        // reality on the next render.
+        if (audio.activeDeviceId !== CONFIG.AUDIO_DEVICE_ID) {
+          CONFIG.AUDIO_DEVICE_ID = audio.activeDeviceId;
+        }
+        return true;
+      }
       catch (err) { throw err; }
     }
     audio.stop();
     return false;
+  },
+  async onAudioDeviceChange(id) {
+    try {
+      await audio.setDeviceId(id);
+    } catch (err) {
+      console.warn('[Fluid] Audio device switch failed:', err);
+    }
   },
   async onToggleTilt(want) {
     if (want) {

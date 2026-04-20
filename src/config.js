@@ -165,6 +165,12 @@ export const CONFIG = {
    */
   AUDIO_REACTIVE: false,
 
+  /** Persisted MediaDeviceInfo.deviceId for the preferred microphone.
+   *  Empty string = use the browser's default device. The id is stable
+   *  per-(browser,origin) so this survives reloads but doesn't cross
+   *  devices. Populated by the device picker in the audio sub-panel. */
+  AUDIO_DEVICE_ID: '',
+
   /** Bass band (Hz). 60–160 trims 50/60 Hz mains hum and stays on the
    *  body of a kick drum. Drives soft converging ring. */
   AUDIO_BASS_LOW_HZ: 60,

@@ -85,6 +85,21 @@ function brushFromSlider(t) {
   return 0.005 + 0.095 * u * u;
 }
 
+/**
+ * Audio per-band sensitivity slider 0..100 → AUDIO_*_SENSITIVITY.
+ *   - 0   → 0.5  (very picky — only loud beats trigger)
+ *   - 55  → ~1.6 (current default — middle of the dial)
+ *   - 100 → 4.0  (extremely sensitive — fires on near-baseline noise)
+ * Logarithmic curve `0.5 · 8^(t/100)` because audio sensitivity is
+ * multiplicative against the rolling baseline; a linear mapping would
+ * cluster every useful value into the lower third of the slider.
+ * Centring the defaults near t=55 was Marcus's UX call.
+ */
+function audioSensitivityFromSlider(t) {
+  const u = Math.max(0, Math.min(1, t / 100));
+  return 0.5 * Math.pow(8, u);
+}
+
 import { COLOR_MODE_LABELS, nextMode } from '../input/Palettes.js';
 import { PRESETS, nextPresetId, applyPreset, getPreset } from '../presets.js';
 
@@ -719,16 +734,117 @@ export class UI {
         const on     = actual === undefined ? want : !!actual;
         this._config.AUDIO_REACTIVE = on;
         this._toggle('btn-audio', on);
+        this._refreshAudioPanelVisibility();
+        if (on) this._populateAudioDevices();
       } catch (err) {
         this._config.AUDIO_REACTIVE = false;
         this._toggle('btn-audio', false);
         btn.classList.add('audio-denied');
         btn.dataset.tip = `Audio unavailable: ${err?.message || 'permission denied'}`;
         console.warn('[Fluid] Audio reactivity unavailable:', err);
+        this._refreshAudioPanelVisibility();
       } finally {
         busy = false;
       }
     });
+
+    // Bind the three sensitivity sliders. They drive AUDIO_*_SENSITIVITY
+    // through a log curve (0..100 → 0.5..4.0); apply the slider's initial
+    // DOM value once so a persisted restore — which sets el.value before
+    // this binding runs — also takes effect at boot.
+    const bindAudioSlider = (id, key) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      this._config[key] = audioSensitivityFromSlider(Number(el.value));
+      el.addEventListener('input', (e) => {
+        this._config[key] = audioSensitivityFromSlider(Number(e.target.value));
+        this._cb.onConfigMutated?.();
+      });
+    };
+    bindAudioSlider('slider-audio-bass',  'AUDIO_SENSITIVITY');
+    bindAudioSlider('slider-audio-mids',  'AUDIO_MIDS_SENSITIVITY');
+    bindAudioSlider('slider-audio-highs', 'AUDIO_HIGHS_SENSITIVITY');
+
+    // Device picker — change handler. enumerateDevices may need
+    // permission to expose labels, so we (re)populate after the audio
+    // graph is started in the click handler above.
+    const sel = document.getElementById('audio-device');
+    if (sel) {
+      sel.addEventListener('change', (e) => {
+        const id = e.target.value || '';
+        this._config.AUDIO_DEVICE_ID = id;
+        this._cb.onAudioDeviceChange?.(id);
+      });
+    }
+
+    // Listen once for hot-plug events; harmless when audio is inactive.
+    if ('mediaDevices' in navigator && navigator.mediaDevices.addEventListener) {
+      navigator.mediaDevices.addEventListener('devicechange', () => {
+        if (this._config.AUDIO_REACTIVE) this._populateAudioDevices();
+      });
+    }
+
+    // Reflect persisted state at boot.
+    this._refreshAudioPanelVisibility();
+
+    // If the user has previously granted mic permission on this origin
+    // (sticky), pre-populate the device picker so their saved choice is
+    // visible the moment they re-enable audio. enumerateDevices() with
+    // a granted permission returns labels; with a prompt/denied state
+    // it returns empty labels, in which case the picker stays as just
+    // the "Default microphone" placeholder until the next start().
+    if (navigator.permissions?.query) {
+      navigator.permissions.query({ name: 'microphone' })
+        .then((perm) => { if (perm.state === 'granted') this._populateAudioDevices(); })
+        .catch(() => { /* Safari and some Firefox versions don't expose
+                          'microphone' permission name — silently skip. */ });
+    }
+  }
+
+  /** Show / hide the audio sub-panel based on the current audio state. */
+  _refreshAudioPanelVisibility() {
+    const panel = document.getElementById('audio-panel');
+    if (panel) panel.hidden = !this._config.AUDIO_REACTIVE;
+  }
+
+  /**
+   * Populate the audio device picker from `enumerateDevices()`. Device
+   * labels are only exposed once the user has granted mic permission, so
+   * this is normally called *after* a successful audio-start. We also
+   * call it at boot when the Permissions API reports a sticky 'granted'
+   * state, so a returning user sees their previously-chosen device in
+   * the picker before re-enabling audio.
+   * @private
+   */
+  async _populateAudioDevices() {
+    const sel = document.getElementById('audio-device');
+    if (!sel || !('mediaDevices' in navigator) || !navigator.mediaDevices.enumerateDevices) return;
+    let devices;
+    try {
+      devices = await navigator.mediaDevices.enumerateDevices();
+    } catch (err) {
+      console.warn('[Fluid] enumerateDevices failed:', err);
+      return;
+    }
+    const inputs = devices.filter((d) => d.kind === 'audioinput');
+    const current = this._config.AUDIO_DEVICE_ID || '';
+    // Rebuild the option list. Always keep "Default microphone" first.
+    sel.innerHTML = '';
+    const def = document.createElement('option');
+    def.value = '';
+    def.textContent = 'Default microphone';
+    sel.appendChild(def);
+    for (const d of inputs) {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      // `label` may be empty if permission has not been granted; fall
+      // back to a stable identifier so the user still sees something.
+      opt.textContent = d.label || `Microphone ${d.deviceId.slice(0, 8)}`;
+      sel.appendChild(opt);
+    }
+    // Restore selection if the persisted device is still present.
+    const stillPresent = !current || inputs.some((d) => d.deviceId === current);
+    sel.value = stillPresent ? current : '';
   }
 
   /* ──────────────────────────────────────────────────────────────────
