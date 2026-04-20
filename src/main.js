@@ -354,6 +354,12 @@ let adaptiveTimer   = 0;
 /** Exponential moving average of frame time (ms). */
 let avgFrameTime = 16.7;
 
+/** Wallpaper-mode auto-splat accumulator (ms). Reset on each emission.
+ *  Lives in the animate-loop scope so pause / hidden-tab gate it for
+ *  free (animate() returns early in those states — no separate timer
+ *  to leak; gotcha #11). */
+let wallpaperAccumMs = 0;
+
 function animate(now) {
   requestAnimationFrame(animate);
 
@@ -415,6 +421,30 @@ function animate(now) {
       };
       fluid.splat(s.x, s.y, s.dx * velScale * r, s.dy * velScale * r, c);
     }
+  }
+
+  // ── Wallpaper-mode auto-splat ─────────────────────────────────────
+  // Soft random splat at a configurable cadence so the canvas keeps
+  // breathing in screensaver mode. Naturally gated by pause and
+  // tab-hide because animate() already returned early in those states
+  // (gotcha #11). Force is scaled down so the cadence reads as
+  // ambient, not aggressive pokes.
+  if (CONFIG.WALLPAPER_MODE) {
+    wallpaperAccumMs += dt * 1000;
+    const interval = CONFIG.WALLPAPER_AUTOSPLAT_INTERVAL_MS;
+    if (interval > 0 && wallpaperAccumMs >= interval) {
+      wallpaperAccumMs = 0;
+      const x = Math.random();
+      const y = Math.random();
+      const angle = Math.random() * Math.PI * 2;
+      const force = CONFIG.SPLAT_FORCE * (CONFIG.WALLPAPER_AUTOSPLAT_FORCE_SCALE || 0.4);
+      const dx = Math.cos(angle) * force;
+      const dy = Math.sin(angle) * force;
+      const color = pickSplatColor(CONFIG.COLOR_MODE || 'rainbow', performance.now() * 0.001);
+      fluid.splat(x, y, dx, dy, color);
+    }
+  } else if (wallpaperAccumMs !== 0) {
+    wallpaperAccumMs = 0;
   }
 
   // ── Fluid step ────────────────────────────────────────────────────

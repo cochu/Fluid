@@ -147,3 +147,22 @@ Each entry: symptom → root cause → fix → why it matters.
   texture will propagate forever).
 - **Fix:** wrap any new spawn / reset path that writes positions to clamp
   outputs to `[0, 1]`. Check `PARTICLE_SPAWN_FRAG` for the existing pattern.
+
+---
+
+## 11. Wallpaper-mode auto-splat keeps ticking when paused / hidden
+
+- **Symptom:** Toggling pause (or hiding the tab) while wallpaper mode is on
+  leads to a burst of splats on un-pause / re-focus, or to silent ticking
+  that wastes CPU.
+- **Cause:** Implementing the cadence with `setInterval` and only gating it
+  at toggle time. The interval keeps firing the handler in the background;
+  even with a `CONFIG.PAUSED` check inside the handler, the elapsed-since-
+  last-emission timer drifts and produces visible bursts when the gate
+  opens again.
+- **Fix:** drive the cadence from a per-frame accumulator inside `animate()`.
+  `animate()` already returns early under `CONFIG.PAUSED` and
+  `document.hidden`, so both pause and tab-hide naturally suppress the
+  splat *and* freeze the accumulator at its current value — the next
+  active frame resumes from where it left off. No separate timer to leak,
+  no backlog. See `wallpaperAccumMs` in `src/main.js`.

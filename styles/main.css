@@ -356,3 +356,48 @@ html, body {
   text-transform: uppercase;
   pointer-events: none;
 }
+
+/* ============================================================
+   Wallpaper / screensaver mode
+   --------------------------------------------------------------
+   Toggled by the 🌙 button. When `body.wallpaper-on` is set, all
+   chrome (panel, FPS, version tag, source overlay) fades to zero
+   opacity over ~900 ms unless `body.wallpaper-revealed` is also
+   set — that class is added by the UI on pointermove / keydown
+   and removed after WALLPAPER_FADE_TIMEOUT_MS of inactivity.
+   The 🌙 button itself stays at full opacity so the user can
+   always tap it to leave wallpaper mode (Marcus's reversibility
+   requirement). pointer-events stay live so any tap hits the
+   button — only the visual chrome fades.
+   ============================================================ */
+body.wallpaper-on #ui-panel,
+body.wallpaper-on #fps-counter,
+body.wallpaper-on #version-tag,
+body.wallpaper-on #sources-overlay {
+  opacity: 0;
+  transition: opacity 900ms ease-out;
+}
+/* Disable pointer events on the (invisible) sources overlay while
+   chrome is faded so an unsuspecting tap on the canvas can't land on
+   an invisible source-marker hit-target. The inner `g.src` opts back
+   in via the bubbled rule below once the chrome is revealed. */
+body.wallpaper-on:not(.wallpaper-revealed) #sources-overlay g.src {
+  pointer-events: none;
+}
+body.wallpaper-on.wallpaper-revealed #ui-panel,
+body.wallpaper-on.wallpaper-revealed #fps-counter,
+body.wallpaper-on.wallpaper-revealed #version-tag,
+body.wallpaper-on.wallpaper-revealed #sources-overlay {
+  opacity: 1;
+  transition: opacity 200ms ease-in;
+}
+/* The wallpaper toggle itself remains visible even when the rest
+   of the panel fades, so the user always has an exit affordance. */
+body.wallpaper-on #btn-wallpaper {
+  opacity: 1 !important;
+}
+body.wallpaper-on #btn-wallpaper.active {
+  /* Subtle moonlit glow so the lone visible button reads as the
+     active mode toggle, not just a stray emoji on a black canvas. */
+  box-shadow: 0 0 18px rgba(170, 220, 255, 0.35);
+}

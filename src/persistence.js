@@ -47,6 +47,7 @@ export const PERSISTED_CONFIG_KEYS = Object.freeze([
   'VISCOSITY',
   'CURL',
   'PERF_MODE',
+  'WALLPAPER_MODE',
   'OBSTACLE_PAINT_RADIUS',
   'SOURCES',
   'AUDIO_GAIN',

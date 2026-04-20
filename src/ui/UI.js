@@ -329,6 +329,7 @@ export class UI {
     this._bindPresetButton();
     this._bindShareButton();
     this._bindResetLongPress();
+    this._bindWallpaperButton();
   }
 
   /* ──────────────────────────────────────────────────────────────────
@@ -531,6 +532,62 @@ export class UI {
     }, true);
   }
 
+  /* ──────────────────────────────────────────────────────────────────
+     Wallpaper / screensaver mode (🌙)
+     --------------------------------------------------------------
+     Toggling the button flips CONFIG.WALLPAPER_MODE and adds/removes
+     `body.wallpaper-on`. While the mode is on, an idle-tracker adds
+     `body.wallpaper-revealed` on any pointermove or keydown and
+     removes it after WALLPAPER_FADE_TIMEOUT_MS — the CSS handles
+     the actual opacity transition. The animate loop in main.js
+     handles the auto-splat cadence by reading CONFIG.WALLPAPER_MODE
+     directly (so pause / hidden tab gate it for free).
+     ────────────────────────────────────────────────────────────────── */
+
+  _bindWallpaperButton() {
+    const btn  = document.getElementById('btn-wallpaper');
+    const body = document.body;
+    if (!btn || !body) return;
+    let revealTimer = 0;
+    const reveal = () => {
+      if (!this._config.WALLPAPER_MODE) return;
+      body.classList.add('wallpaper-revealed');
+      clearTimeout(revealTimer);
+      revealTimer = setTimeout(() => {
+        body.classList.remove('wallpaper-revealed');
+      }, this._config.WALLPAPER_FADE_TIMEOUT_MS || 5000);
+    };
+    // Pointermove + keydown only (per Marcus): touchstart fires during
+    // a panning scroll and would flash the UI on every drag of the fluid.
+    window.addEventListener('pointermove', reveal, { passive: true });
+    window.addEventListener('keydown',     reveal, { passive: true });
+
+    btn.addEventListener('click', () => {
+      const want = !this._config.WALLPAPER_MODE;
+      this._config.WALLPAPER_MODE = want;
+      btn.classList.toggle('active', want);
+      body.classList.toggle('wallpaper-on', want);
+      if (want) {
+        // Show the chrome briefly so the user sees the new active
+        // state, then let the idle timer fade it out.
+        reveal();
+      } else {
+        clearTimeout(revealTimer);
+        body.classList.remove('wallpaper-revealed');
+      }
+      this._cb.onWallpaperChange?.(want);
+    });
+
+    // If persistence restored WALLPAPER_MODE = true at boot, reflect
+    // it now (the UI constructor already fires _syncStates which will
+    // toggle the .active class, but the body class needs us).
+    if (this._config.WALLPAPER_MODE) {
+      btn.classList.add('active');
+      body.classList.add('wallpaper-on');
+      reveal();
+    }
+  }
+
 
   /* ──────────────────────────────────────────────────────────────────
      Tilt / accelerometer (asynchronous — needs motion permission on iOS)
@@ -726,6 +783,7 @@ export class UI {
     this._toggle('btn-tilt',      this._config.TILT_REACTIVE);
     this._toggle('btn-obstacles', this._config.OBSTACLE_MODE);
     this._toggle('btn-source',    this._config.SOURCE_MODE);
+    this._toggle('btn-wallpaper', this._config.WALLPAPER_MODE);
     // Reflect the user-explicit perf-mode flag (the button's visual state
     // mirrors CONFIG.PERF_MODE, not the live SIM_RESOLUTION which adaptive
     // downscale can mutate transiently).

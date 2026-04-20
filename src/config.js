@@ -219,4 +219,22 @@ export const CONFIG = {
    * without freezing a transient adaptive state. Toggled by ⚡.
    */
   PERF_MODE: false,
+
+  /* ── Wallpaper / screensaver mode ─────────────────────────────────── */
+  /**
+   * Toggled by 🌙. When true, the UI panel + version tag + FPS counter
+   * fade out after WALLPAPER_FADE_TIMEOUT_MS of no pointer/keyboard
+   * activity (CSS-driven via the `.wallpaper-on`/`.wallpaper-revealed`
+   * body classes), and the animate loop emits one soft auto-splat every
+   * WALLPAPER_AUTOSPLAT_INTERVAL_MS so the canvas keeps breathing.
+   * Both pause (CONFIG.PAUSED) and tab-hide (document.hidden) gate the
+   * auto-splat naturally because animate() returns early in those
+   * states — no separate timer to leak (gotcha #11).
+   */
+  WALLPAPER_MODE: false,
+  WALLPAPER_AUTOSPLAT_INTERVAL_MS: 1800,
+  WALLPAPER_FADE_TIMEOUT_MS: 5000,
+  /** Force scale applied to wallpaper auto-splats relative to a normal
+   *  user splat (lower = gentler ambient cadence). */
+  WALLPAPER_AUTOSPLAT_FORCE_SCALE: 0.4,
 };
