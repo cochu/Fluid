@@ -205,6 +205,86 @@ test('sim', 'idle simulation stays bounded (no NaN, no trame blow-up)', async ()
 });
 
 /* ────────────────────────────────────────────────────────────────────── */
+/*  Suite: Boot canary                                                    */
+/* ────────────────────────────────────────────────────────────────────── */
+
+/*
+ * Why this exists: PR #8 (`fix(boot): hoist recorder above UI to break the
+ * TDZ that froze main.js`) shipped because nothing in the harness ever
+ * *evaluated* `src/main.js`. A `const` referenced inside the eager UI
+ * options literal before its own declaration threw a `ReferenceError` at
+ * module top-level — the canvas froze, the buttons painted dead. The
+ * config / palette / sim suites all import their leaves directly and
+ * never touch the bootstrap module, so the failure was invisible to them.
+ *
+ * This test loads the real `index.html` inside an isolated iframe (via
+ * `srcdoc` + `<base href>`), captures any uncaught script error or
+ * unhandled rejection that fires during boot, and asserts the list is
+ * empty. It catches TDZ regressions, missing imports, malformed module
+ * URLs, and any other top-level runtime explosion in a single check.
+ *
+ * Notes:
+ *  - We use srcdoc so the iframe's location is `about:srcdoc`, which
+ *    sidesteps the service-worker registration guard in index.html
+ *    (it only registers under https/localhost/127.0.0.1). No SW state
+ *    leaks into the test harness origin.
+ *  - We only capture `error` and `unhandledrejection`, not console.error,
+ *    because main.js legitimately logs warnings on unsupported features
+ *    (recorder, MIDI permissions, etc.) and we don't want those to
+ *    flap the test.
+ */
+
+test('boot', 'index.html boots without uncaught script errors', async () => {
+  const baseHref  = new URL('..', document.baseURI).href;
+  const indexHtml = await fetch('../index.html').then(r => r.text());
+  const guard = `
+    <base href="${baseHref}">
+    <script>
+      window.__bootErrors = [];
+      window.addEventListener('error', function (e) {
+        if (e.error || e.message) {
+          window.__bootErrors.push(
+            'error: ' + (e.message || String(e.error)) +
+            (e.filename ? ' @ ' + e.filename + ':' + e.lineno : '')
+          );
+        }
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var r = e.reason;
+        window.__bootErrors.push('unhandled rejection: ' + ((r && r.message) || String(r)));
+      });
+    </script>`;
+  // Inject the base + guard as the very first children of <head> so they
+  // run before any module script is fetched or evaluated.
+  const patched = indexHtml.replace(/<head[^>]*>/i, m => m + guard);
+
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText =
+    'position:absolute;left:-9999px;top:0;width:320px;height:240px;border:0;visibility:hidden;';
+  iframe.srcdoc = patched;
+  document.body.appendChild(iframe);
+
+  try {
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('iframe load timeout (4s)')), 4000);
+      iframe.addEventListener('load', () => { clearTimeout(t); resolve(); }, { once: true });
+    });
+    // Module graphs continue to evaluate after the iframe `load` event;
+    // give ~1.5 s of wall clock so a late-throwing top-level statement
+    // still surfaces before we read the error array.
+    await new Promise(r => setTimeout(r, 1500));
+    const errs = iframe.contentWindow.__bootErrors || [];
+    if (errs.length > 0) {
+      throw new Error(
+        'boot produced ' + errs.length + ' error(s):\n  - ' + errs.join('\n  - ')
+      );
+    }
+  } finally {
+    iframe.remove();
+  }
+});
+
+/* ────────────────────────────────────────────────────────────────────── */
 /*  Runner                                                                 */
 /* ────────────────────────────────────────────────────────────────────── */
 
