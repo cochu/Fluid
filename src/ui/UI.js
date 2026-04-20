@@ -382,6 +382,8 @@ export class UI {
 
     this._bind('btn-snapshot', 'click', () => this._cb.onSnapshot?.());
 
+    this._bindRecordButton();
+
     this._bindAudioButton();
     this._bindMidiButton();
     this._bindTiltButton();
@@ -1152,6 +1154,38 @@ export class UI {
     // Force reflow so re-adding the class restarts the animation.
     void el.offsetWidth;
     el.classList.add('flash');
+  }
+
+  /* ──────────────────────────────────────────────────────────────────
+     Recording (delegates to main.js's Recorder via onToggleRecord)
+     ────────────────────────────────────────────────────────────────── */
+
+  _bindRecordButton() {
+    const btn = document.getElementById('btn-record');
+    if (!btn) return;
+    // Hide the button entirely when MediaRecorder/captureStream is
+    // unavailable (some iOS Safari versions). Quiet failure mode —
+    // we don't want to show a button that can never work.
+    if (this._cb.recordingSupported === false) {
+      btn.hidden = true;
+      return;
+    }
+    btn.addEventListener('click', () => {
+      const recording = !!this._cb.onToggleRecord?.();
+      this._refreshRecordButton(recording);
+    });
+  }
+  _refreshRecordButton(recording) {
+    const btn = document.getElementById('btn-record');
+    if (!btn) return;
+    btn.classList.toggle('active', recording);
+    // Glyph swap: ⏺ idle → ⏹ while recording so the button reads as
+    // "press to stop" on the second tap.
+    btn.textContent = recording ? '⏹' : '⏺';
+    const label = recording ? 'Stop recording (saves WebM)' : 'Record video (WebM)';
+    btn.dataset.tip = label;
+    btn.setAttribute('aria-label', label);
+    if (recording) this._flashTip(btn, 'Recording…');
   }
 
   /* ──────────────────────────────────────────────────────────────────

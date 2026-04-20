@@ -20,6 +20,7 @@ import { MidiInput }        from './input/MidiInput.js';
 import { AccelerometerInput } from './input/AccelerometerInput.js';
 import { pickSplatColor }   from './input/Palettes.js';
 import { BUILD_VERSION }    from './version.js';
+import { Recorder, isSupported as isRecordingSupported } from './recording/Recorder.js';
 import {
   bootstrap as bootPersistence,
   installAutoSave,
@@ -362,6 +363,21 @@ const ui = new UI(CONFIG, {
   onSnapshot() {
     saveSnapshot();
   },
+  onToggleRecord() {
+    if (!recorder) return false;
+    if (recorder.isRecording) {
+      recorder.stop();
+      return false;
+    }
+    try {
+      recorder.start();
+      return true;
+    } catch (err) {
+      console.warn('[fluid] recording failed to start:', err);
+      return false;
+    }
+  },
+  recordingSupported: !!recorder,
   async onToggleAudio(want) {
     if (want) {
       try {
@@ -492,6 +508,17 @@ function doSnapshot() {
     ui.flashSnapshot();
   }, 'image/png');
 }
+
+/* ──────────────────────────────────────────────────────────────────────
+   4f.  Recording (MediaRecorder → WebM download)
+   --------------------------------------------------------------------
+   Captures the live canvas via captureStream() and packs frames into
+   a WebM blob in the background while the simulation keeps running.
+   On stop, triggers a download. See src/recording/Recorder.js for the
+   codec-priority logic and download wiring.
+   ────────────────────────────────────────────────────────────────────── */
+
+const recorder = isRecordingSupported() ? new Recorder(canvas, { fps: 60 }) : null;
 
 /* ──────────────────────────────────────────────────────────────────────
    5b. Audio reactivity (microphone-driven radial speaker waves)
