@@ -299,6 +299,18 @@ const ui = new UI(CONFIG, {
   onToggleBloom(on) {},
   onToggleColorful(on) {},
   onTogglePerfMode(perfMode) {
+    // Capture the user's new resolution intent as the adaptive ceiling
+    // so recovery never overshoots their explicit choice. Toggling
+    // perf-mode off raises the ceiling back to whatever CONFIG holds
+    // for the non-perf path (the perf button has already mutated the
+    // resolution before this callback runs).
+    simResolutionCeiling = CONFIG.SIM_RESOLUTION;
+    dyeResolutionCeiling = CONFIG.DYE_RESOLUTION;
+    // Forget any in-flight hysteresis — the prior frame samples are
+    // no longer informative once the grid size changes underneath us.
+    downscaleConsecutive = 0;
+    upscaleConsecutive   = 0;
+    adaptiveCooldownUntil = performance.now() + CONFIG.ADAPTIVE_COOLDOWN_AFTER_DOWNSCALE_MS;
     rebuildSubsystems('perf-mode toggle');
   },
   onForceChange(v) {},
@@ -461,6 +473,29 @@ let avgFrameTime = 16.7;
  *  to leak; gotcha #11). */
 let wallpaperAccumMs = 0;
 
+/* ──────────────────────────────────────────────────────────────────────
+   Adaptive resolution state
+   --------------------------------------------------------------------
+   The user-intent "ceiling" for SIM/DYE resolution: adaptive recovery
+   never doubles past these. Captured at boot (after persistence, so a
+   restored PERF_MODE = true is honoured) and re-captured whenever the
+   ⚡ perf toggle fires. Stored as closure `let` rather than CONFIG keys
+   because they are derived runtime context, not user-facing tunables —
+   they should never appear in snapshots or share-links (Maya).
+   ────────────────────────────────────────────────────────────────────── */
+let simResolutionCeiling = CONFIG.SIM_RESOLUTION;
+let dyeResolutionCeiling = CONFIG.DYE_RESOLUTION;
+
+/** Hysteresis counters: number of consecutive check windows whose
+ *  avgFrameTime cleared the corresponding threshold. Reset to 0 after
+ *  each transition AND on tab visibility change (gotcha #12). */
+let downscaleConsecutive = 0;
+let upscaleConsecutive   = 0;
+
+/** Cool-down deadline (performance.now() ms). Adaptive checks no-op
+ *  until the wall clock reaches this. Reset on every transition. */
+let adaptiveCooldownUntil = 0;
+
 function animate(now) {
   requestAnimationFrame(animate);
 
@@ -473,16 +508,54 @@ function animate(now) {
   lastTime = now;
 
   // ── Adaptive resolution ──────────────────────────────────────────
-  const threshold = CONFIG.ADAPTIVE_RESOLUTION_THRESHOLD_MS;
-  if (threshold > 0) {
+  // Two-sided controller: hysteresis on downscale (filters hiccups,
+  // gotcha #8), upscale recovery toward the user-intent ceiling, and
+  // an asymmetric cool-down (longer after upscale because doubling is
+  // the riskier transition).
+  const downThreshold = CONFIG.ADAPTIVE_RESOLUTION_THRESHOLD_MS;
+  if (downThreshold > 0 && !CONFIG.ADAPTIVE_RESOLUTION_DISABLED) {
     adaptiveTimer += dt;
     if (adaptiveTimer > CONFIG.ADAPTIVE_RESOLUTION_CHECK_INTERVAL) {
       adaptiveTimer = 0;
-      if (avgFrameTime > threshold && CONFIG.SIM_RESOLUTION > 64) {
-        CONFIG.SIM_RESOLUTION = Math.max(64, CONFIG.SIM_RESOLUTION >> 1);
-        CONFIG.DYE_RESOLUTION = Math.max(128, CONFIG.DYE_RESOLUTION >> 1);
-        rebuildSubsystems('adaptive downscale');
-        console.log(`[Fluid] Auto-reduced resolution to ${CONFIG.SIM_RESOLUTION}`);
+      const nowMs = performance.now();
+      if (nowMs >= adaptiveCooldownUntil) {
+        const upThreshold     = CONFIG.ADAPTIVE_UPSCALE_THRESHOLD_MS;
+        const downConsecutive = CONFIG.ADAPTIVE_DOWNSCALE_CONSECUTIVE;
+        const upConsecutive   = CONFIG.ADAPTIVE_UPSCALE_CONSECUTIVE;
+
+        if (avgFrameTime > downThreshold && CONFIG.SIM_RESOLUTION > 64) {
+          downscaleConsecutive++;
+          upscaleConsecutive = 0;
+          if (downscaleConsecutive >= downConsecutive) {
+            const oldSim = CONFIG.SIM_RESOLUTION;
+            CONFIG.SIM_RESOLUTION = Math.max(64,  CONFIG.SIM_RESOLUTION >> 1);
+            CONFIG.DYE_RESOLUTION = Math.max(128, CONFIG.DYE_RESOLUTION >> 1);
+            rebuildSubsystems('adaptive downscale');
+            console.info(`[Fluid] adaptive downscale ${oldSim}→${CONFIG.SIM_RESOLUTION} (avgFrame=${avgFrameTime.toFixed(1)}ms, target<${downThreshold}ms)`);
+            downscaleConsecutive  = 0;
+            adaptiveCooldownUntil = nowMs + CONFIG.ADAPTIVE_COOLDOWN_AFTER_DOWNSCALE_MS;
+          }
+        } else if (avgFrameTime < upThreshold &&
+                   CONFIG.SIM_RESOLUTION < simResolutionCeiling) {
+          upscaleConsecutive++;
+          downscaleConsecutive = 0;
+          if (upscaleConsecutive >= upConsecutive) {
+            const oldSim = CONFIG.SIM_RESOLUTION;
+            CONFIG.SIM_RESOLUTION = Math.min(simResolutionCeiling, CONFIG.SIM_RESOLUTION << 1);
+            CONFIG.DYE_RESOLUTION = Math.min(dyeResolutionCeiling, CONFIG.DYE_RESOLUTION << 1);
+            rebuildSubsystems('adaptive upscale');
+            console.info(`[Fluid] adaptive upscale ${oldSim}→${CONFIG.SIM_RESOLUTION} (avgFrame=${avgFrameTime.toFixed(1)}ms, target>${upThreshold}ms)`);
+            upscaleConsecutive    = 0;
+            adaptiveCooldownUntil = nowMs + CONFIG.ADAPTIVE_COOLDOWN_AFTER_UPSCALE_MS;
+          }
+        } else {
+          // In the hysteresis band [upThreshold, downThreshold]: the
+          // current resolution is the right choice. Decay both
+          // counters slowly so a brief excursion doesn't immediately
+          // satisfy the consecutive requirement on the other side.
+          if (downscaleConsecutive > 0) downscaleConsecutive--;
+          if (upscaleConsecutive   > 0) upscaleConsecutive--;
+        }
       }
     }
   }
@@ -618,5 +691,12 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     // Reset lastTime so we don't get a huge dt after returning
     lastTime = performance.now();
+    // Reset adaptive hysteresis counters: any prior frame-time samples
+    // straddled the hidden interval and are no longer trustworthy
+    // (the user's machine may have dropped into a power-saving state
+    // while we were in the background) — gotcha #12.
+    downscaleConsecutive = 0;
+    upscaleConsecutive   = 0;
+    adaptiveCooldownUntil = performance.now() + CONFIG.ADAPTIVE_COOLDOWN_AFTER_DOWNSCALE_MS;
   }
 });

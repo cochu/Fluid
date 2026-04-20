@@ -166,3 +166,22 @@ Each entry: symptom → root cause → fix → why it matters.
   splat *and* freeze the accumulator at its current value — the next
   active frame resumes from where it left off. No separate timer to leak,
   no backlog. See `wallpaperAccumMs` in `src/main.js`.
+
+---
+
+## 12. Adaptive resolution mis-fires after a tab visibility change
+
+- **Symptom:** Returning to the tab after several minutes triggers an
+  immediate adaptive downscale even though the canvas now renders at a
+  comfortable rate.
+- **Cause:** The hysteresis counters (`downscaleConsecutive`,
+  `upscaleConsecutive`) and the EMA `avgFrameTime` straddle the hidden
+  interval. The samples taken right before the tab was hidden may have
+  been bad (the OS started throttling background rAF callbacks); the
+  next active sample inherits that history and the consecutive-window
+  threshold is satisfied immediately.
+- **Fix:** in the `visibilitychange` handler, when `!document.hidden`,
+  reset `downscaleConsecutive` and `upscaleConsecutive` to 0 and push
+  `adaptiveCooldownUntil` out by one downscale cool-down so the next
+  decision waits for a fresh window of samples. `lastTime` is already
+  reset there for the same reason.

@@ -123,6 +123,38 @@ export const CONFIG = {
   /** How often (seconds) to re-evaluate whether adaptive resolution should trigger. */
   ADAPTIVE_RESOLUTION_CHECK_INTERVAL: 2,
 
+  /** Number of consecutive bad-frame check windows required before an
+   *  adaptive downscale fires. Two windows (~4 s with the default
+   *  CHECK_INTERVAL) filters out a single hiccup such as a GC pause or
+   *  tab refresh — gotcha #8. */
+  ADAPTIVE_DOWNSCALE_CONSECUTIVE: 2,
+
+  /** Average frame time below which adaptive recovery considers
+   *  upscaling. Set to a clear margin under the downscale threshold so
+   *  the system doesn't ping-pong: the gap between this and
+   *  ADAPTIVE_RESOLUTION_THRESHOLD_MS is the hysteresis band. Default
+   *  ~13 ms ≈ 0.6 × the 22 ms downscale gate. */
+  ADAPTIVE_UPSCALE_THRESHOLD_MS: 13,
+
+  /** Number of consecutive good-frame check windows required before an
+   *  adaptive upscale fires. Higher than DOWNSCALE_CONSECUTIVE because
+   *  recovery is the riskier transition (a sudden doubling can blow
+   *  the budget itself); 4 windows ≈ 8 s of clean frames. */
+  ADAPTIVE_UPSCALE_CONSECUTIVE: 4,
+
+  /** Cool-down (ms) after a downscale before another adaptive decision
+   *  can fire — gives the smaller grid time to settle the EMA. */
+  ADAPTIVE_COOLDOWN_AFTER_DOWNSCALE_MS: 3000,
+
+  /** Cool-down (ms) after an upscale. Longer than the downscale path
+   *  because doubling resolution is the riskier transition. */
+  ADAPTIVE_COOLDOWN_AFTER_UPSCALE_MS: 5000,
+
+  /** Master kill-switch for adaptive resolution. The bench harness
+   *  flips this true before instantiation so its measurements aren't
+   *  contaminated by mid-run resolution changes. */
+  ADAPTIVE_RESOLUTION_DISABLED: false,
+
   /** Dimming factor applied to splat colours so they blend well in the fluid. */
   DYE_BRIGHTNESS: 0.15,
 
