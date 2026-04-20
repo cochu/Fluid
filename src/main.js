@@ -323,6 +323,22 @@ canvas.addEventListener('pointercancel',obstacleDragEnd);
 canvas.addEventListener('lostpointercapture', obstacleDragEnd);
 
 /* ──────────────────────────────────────────────────────────────────────
+   4f.  Recording (MediaRecorder → WebM download)
+   --------------------------------------------------------------------
+   Captures the live canvas via captureStream() and packs frames into
+   a WebM blob in the background while the simulation keeps running.
+   On stop, triggers a download. See src/recording/Recorder.js for the
+   codec-priority logic and download wiring.
+
+   Must be constructed BEFORE the UI: the UI's options object reads
+   `recordingSupported: !!recorder`, and a `const` referenced before its
+   declaration throws a TDZ ReferenceError that aborts main.js
+   evaluation entirely (UI shell paints, nothing else wires up).
+   ────────────────────────────────────────────────────────────────────── */
+
+const recorder = isRecordingSupported() ? new Recorder(canvas, { fps: 60 }) : null;
+
+/* ──────────────────────────────────────────────────────────────────────
    5.  UI
    ────────────────────────────────────────────────────────────────────── */
 
@@ -508,17 +524,6 @@ function doSnapshot() {
     ui.flashSnapshot();
   }, 'image/png');
 }
-
-/* ──────────────────────────────────────────────────────────────────────
-   4f.  Recording (MediaRecorder → WebM download)
-   --------------------------------------------------------------------
-   Captures the live canvas via captureStream() and packs frames into
-   a WebM blob in the background while the simulation keeps running.
-   On stop, triggers a download. See src/recording/Recorder.js for the
-   codec-priority logic and download wiring.
-   ────────────────────────────────────────────────────────────────────── */
-
-const recorder = isRecordingSupported() ? new Recorder(canvas, { fps: 60 }) : null;
 
 /* ──────────────────────────────────────────────────────────────────────
    5b. Audio reactivity (microphone-driven radial speaker waves)
