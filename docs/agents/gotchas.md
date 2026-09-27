@@ -214,6 +214,16 @@ Each entry: symptom → root cause → fix → why it matters.
   cautionary comment in `src/main.js`) above `new UI(...)`. Same
   hoisting rule applies to any future binding referenced in that
   literal.
+- **Lazy callbacks turn eager when boot code fires them.** A
+  method-shorthand callback is only safe until top-level code calls it
+  synchronously. The persisted-slider replay (`dispatchEvent('input')`
+  on each restored slider) runs UI handlers that call
+  `onConfigMutated()`, which read `persistAutoSave` while it was still
+  declared further down. The result was one non-fatal `ReferenceError`
+  per audio slider on every reload with a saved snapshot. Any binding a
+  callback reads must be declared above the **first synchronous
+  trigger** (`dispatchEvent`, `ui.refreshSources()`, `applyPreset`, …),
+  not merely above `new UI(...)`. `x?.foo()` does **not** guard a TDZ.
 - **What NOT to do:** Don't paper over by switching the eager value to
   a getter (`get recordingSupported() { return !!recorder; }`); the UI
   caches the value at construction and the runtime feature flag would
@@ -222,7 +232,10 @@ Each entry: symptom → root cause → fix → why it matters.
   `index.html` inside an isolated iframe and asserts no uncaught script
   errors fire during boot. **Run it on every PR that touches `main.js`
   or any of its imports.** It is the only test in the harness that
-  actually evaluates the bootstrap module.
+  actually evaluates the bootstrap module. The `boot (restored
+  storage)` case seeds a snapshot with every persisted slider so the
+  replay path above is exercised; a fresh profile alone never reaches
+  it.
 
 ---
 

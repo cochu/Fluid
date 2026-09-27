@@ -20,7 +20,7 @@
 
 import { CONFIG }              from '../src/config.js';
 import { pickSplatColor, paletteAccent, nextMode } from '../src/input/Palettes.js';
-import { applyToConfig, snapshot, PERSISTED_CONFIG_KEYS, SCHEMA_VERSION } from '../src/persistence.js';
+import { applyToConfig, snapshot, PERSISTED_CONFIG_KEYS, PERSISTED_SLIDER_IDS, SCHEMA_VERSION, STORAGE_KEY } from '../src/persistence.js';
 import { getWebGL2Context }    from '../src/webgl/GLUtils.js';
 import { FluidSimulation }     from '../src/fluid/FluidSimulation.js';
 
@@ -361,7 +361,7 @@ test('sim', 'idle simulation stays bounded (no NaN, no trame blow-up)', async ()
  *    flap the test.
  */
 
-test('boot', 'index.html boots without uncaught script errors', async () => {
+async function bootIndexInIframe() {
   const baseHref  = new URL('..', document.baseURI).href;
   const indexHtml = await fetch('../index.html').then(r => r.text());
   const guard = `
@@ -400,15 +400,74 @@ test('boot', 'index.html boots without uncaught script errors', async () => {
     // give ~1.5 s of wall clock so a late-throwing top-level statement
     // still surfaces before we read the error array.
     await new Promise(r => setTimeout(r, 1500));
-    const errs = iframe.contentWindow.__bootErrors || [];
-    if (errs.length > 0) {
-      throw new Error(
-        'boot produced ' + errs.length + ' error(s):\n  - ' + errs.join('\n  - ')
-      );
-    }
+    return iframe.contentWindow.__bootErrors || [];
   } finally {
     iframe.remove();
   }
+}
+
+function assertNoBootErrors(errs) {
+  if (errs.length > 0) {
+    throw new Error(
+      'boot produced ' + errs.length + ' error(s):\n  - ' + errs.join('\n  - ')
+    );
+  }
+}
+
+// srcdoc iframes share this page's origin, hence its localStorage: pin the
+// persisted snapshot per test so the result never depends on whatever the
+// developer last saved while using the app on the same origin.
+async function withStoredSnapshot(value, fn) {
+  const prev = localStorage.getItem(STORAGE_KEY);
+  try {
+    if (value === null) localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, value);
+    return await fn();
+  } finally {
+    if (prev === null) localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, prev);
+  }
+}
+
+test('boot', 'index.html boots without uncaught script errors', async () => {
+  await withStoredSnapshot(null, async () => assertNoBootErrors(await bootIndexInIframe()));
+});
+
+// A fresh profile never reaches the persisted-slider replay, which is
+// where the persistAutoSave TDZ hid (gotchas #13). Seed every persisted
+// slider so each replayed handler runs, and check the replay doesn't
+// write the restored state straight back.
+test('boot', 'boot (restored storage) replays sliders without errors or writes', async () => {
+  const sliders = {};
+  for (const id of PERSISTED_SLIDER_IDS) sliders[id] = 60;
+  const seeded = JSON.stringify({ v: SCHEMA_VERSION, cfg: {}, sliders });
+  await withStoredSnapshot(seeded, async () => {
+    assertNoBootErrors(await bootIndexInIframe());
+    if (localStorage.getItem(STORAGE_KEY) !== seeded) {
+      throw new Error('boot replay rewrote the persisted snapshot');
+    }
+  });
+});
+
+// A module missing from APP_SHELL 404s the static import graph offline
+// and freezes the canvas. Walk every static import reachable from
+// main.js and require each one to be pre-cached.
+test('sw', 'APP_SHELL pre-caches every module statically imported from main.js', async () => {
+  const swSrc = await fetch('../sw.js').then(r => r.text());
+  const shell = new Set([...swSrc.matchAll(/'\.\/(src\/[^']+\.js)'/g)].map(m => m[1]));
+  const seen  = new Set();
+  const queue = ['src/main.js'];
+  while (queue.length) {
+    const path = queue.shift();
+    if (seen.has(path)) continue;
+    seen.add(path);
+    const src = await fetch('../' + path).then(r => r.text());
+    for (const m of src.matchAll(/^\s*(?:import|export)\s[^;]*?from\s+['"](\.[^'"]+)['"]/gm)) {
+      queue.push(new URL(m[1], 'http://x/' + path).pathname.slice(1));
+    }
+  }
+  const missing = [...seen].filter(p => !shell.has(p));
+  if (missing.length) throw new Error('missing from APP_SHELL: ' + missing.join(', '));
 });
 
 /* ────────────────────────────────────────────────────────────────────── */

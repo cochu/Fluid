@@ -320,9 +320,8 @@ export function buildShareUrl() {
  * When the source is 'hash', the caller should NOT auto-persist on its
  * first save (so a shared link doesn't permanently overwrite the
  * recipient's local memory) — but subsequent user mutations are normal.
- * The simplest enforcement is to skip writing the very first debounced
- * snapshot triggered by `applyToConfig`-driven slider events; main.js
- * does this by suppressing persistence for one frame after boot.
+ * main.js gates every save requested during the synthetic slider replay,
+ * and for a hash boot keeps the gate closed for ~700 ms afterwards.
  */
 export function bootstrap() {
   const fromHash = decodeShareHash(window.location.hash);

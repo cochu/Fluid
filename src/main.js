@@ -502,30 +502,35 @@ const ui = new UI(CONFIG, {
   onPresetChange(_id) { /* visual feedback already handled by UI; no rebuild needed */ },
 });
 
+// Install the auto-save watcher AFTER the UI is built so all wired
+// handlers run on the bubble phase first; we then snapshot the
+// post-mutation CONFIG. It must also precede the slider replay below:
+// those 'input' events reach onConfigMutated, which reads this binding
+// (TDZ otherwise — gotchas #13). The replay itself is gated so restoring
+// state never writes it back; when the boot source is a URL hash, the
+// ~0.7 s window additionally keeps a shared link from permanently
+// overwriting the recipient's local snapshot.
+let persistReplaying = true;
+const persistSuppressUntil = persistBoot.source === 'hash'
+  ? performance.now() + 700
+  : 0;
+const persistAutoSave = installAutoSave({
+  panelEl: document.getElementById('ui-panel'),
+  gate:    () => persistReplaying || performance.now() < persistSuppressUntil,
+});
+
 // Re-fire 'input' events on any slider whose DOM value was restored at
 // boot so the existing UI handlers re-derive engineering CONFIG values
 // via the canonical curve mappings (avoids a stored-vs-derived skew).
 for (const id of persistBoot.sliderIds) {
   document.getElementById(id)?.dispatchEvent(new Event('input', { bubbles: true }));
 }
+persistReplaying = false;
 
 // Replay any persisted SOURCES into the UI overlay so handles render.
 if (Array.isArray(CONFIG.SOURCES) && CONFIG.SOURCES.length) {
   ui.refreshSources?.();
 }
-
-// Install the auto-save watcher AFTER the UI is built so all wired
-// handlers run on the bubble phase first; we then snapshot the
-// post-mutation CONFIG. When the boot source is a URL hash, suppress
-// the very first debounced save (~0.7 s) so visiting a shared link
-// doesn't permanently overwrite the recipient's local snapshot.
-const persistSuppressUntil = persistBoot.source === 'hash'
-  ? performance.now() + 700
-  : 0;
-const persistAutoSave = installAutoSave({
-  panelEl: document.getElementById('ui-panel'),
-  gate:    () => performance.now() < persistSuppressUntil,
-});
 
 /** Most recent particle drop request from the UI; consumed in animate(). */
 let pendingDrop = null;
