@@ -47,8 +47,10 @@ one almost always re-introduces a known regression — see [`docs/agents/gotchas
    top-level `const`/`let` must be declared **above** every site that
    reads it, **including inside object literals passed eagerly to
    constructors** (e.g. the `new UI(CONFIG, { … })` options literal).
-   Method-shorthand keys are lazy and safe; bare value expressions are
-   eager and TDZ-throwing. See
+   Method-shorthand keys are lazy — until boot code calls them
+   synchronously (e.g. the persisted-slider replay firing
+   `onConfigMutated`); bare value expressions are always eager and
+   TDZ-throwing. `x?.foo()` does not guard a TDZ. See
    [`docs/agents/gotchas.md#13`](docs/agents/gotchas.md#13-tdz-in-mainjs-boot--frozen-canvas-no-input-wired).
 8. **Comments only when they add information.** This repo has a deliberate
    style: explain *why* (or *what regression this fix prevents*), never *what*.

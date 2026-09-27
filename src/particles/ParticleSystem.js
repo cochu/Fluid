@@ -4,8 +4,8 @@
  * Particle positions are stored in a float texture (RGBA16F).
  * Each texel represents one particle: (x, y, lifetime, 0).
  *
- * Update pass: fragment shader advects each particle using the fluid
- *              velocity field and decrements its lifetime.
+ * Update pass: fragment shader advects live particles (lifetime > 0)
+ *              with the fluid velocity; dormant ones pass through.
  * Render pass: vertex shader reads position via `texelFetch` using
  *              `gl_VertexID`; particles drawn as GL_POINTS with soft glow.
  */
@@ -114,33 +114,16 @@ export class ParticleSystem {
     const format         = gl.RGBA;
     const type           = this.ext.supportHalfFloat ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
 
-    // Seed initial positions (random scatter, full lifetime)
-    const data = new Float32Array(this._count * 4);
-    for (let i = 0; i < this._count; i++) {
-      data[i * 4 + 0] = Math.random();          // x
-      data[i * 4 + 1] = Math.random();          // y
-      data[i * 4 + 2] = Math.random();          // lifetime [0,1] (staggered)
-      data[i * 4 + 3] = 0;
-    }
-
-    // For UNSIGNED_BYTE fallback we can't easily seed, so use empty (particles respawn)
-    const initialData = this.ext.supportHalfFloat ? data : null;
-
-    // Position double FBO
+    // Start dormant: texImage2D(null) is zero-filled by spec, so lifetime
+    // is 0 regardless of clearColor, and particles only appear via the
+    // drop tool. A random-scatter seed used to live here, but its
+    // Float32Array + HALF_FLOAT upload was INVALID_OPERATION, so the empty
+    // start was already the shipped behaviour — and a working seed would
+    // never decay, since PARTICLE_UPDATE_FRAG doesn't age particles.
     this._posFBO = createDoubleFBO(
       gl, this._texW, this._texH,
       internalFormat, format, type, gl.NEAREST
     );
-
-    // Upload initial data into the read FBO
-    if (initialData) {
-      gl.bindTexture(gl.TEXTURE_2D, this._posFBO.read.texture);
-      gl.texImage2D(
-        gl.TEXTURE_2D, 0, internalFormat,
-        this._texW, this._texH, 0,
-        format, type, initialData
-      );
-    }
 
     // Index buffer [0, 1, 2, ..., count-1] for the render draw call
     this._buildIndexBuffer();

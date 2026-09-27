@@ -21,7 +21,7 @@
  * GitHub Pages project sites).
  */
 
-const CACHE_VERSION = 'fluid-v2';
+const CACHE_VERSION = 'fluid-v3';
 
 const APP_SHELL = [
   './',
@@ -31,11 +31,17 @@ const APP_SHELL = [
   './styles/main.css',
   './src/main.js',
   './src/config.js',
+  './src/version.js',
+  './src/persistence.js',
+  './src/presets.js',
   './src/webgl/GLUtils.js',
   './src/fluid/FluidSimulation.js',
   './src/fluid/Shaders.js',
   './src/particles/ParticleSystem.js',
   './src/input/InputHandler.js',
+  './src/input/Palettes.js',
+  './src/input/MidiInput.js',
+  './src/input/AccelerometerInput.js',
   './src/ui/UI.js',
   './src/audio/AudioReactivity.js',
   './src/recording/Recorder.js',

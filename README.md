@@ -170,7 +170,7 @@ Fluid ships as an installable PWA:
   (HTML, CSS, every ES-module source, the manifest and the icon) and then serves
   same-origin GET requests using a stale-while-revalidate strategy. Navigations
   fall back to cached `index.html` when the network is offline.
-- The cache name is **versioned** (`fluid-v2`) — bumping it invalidates the old
+- The cache name is **versioned** (`fluid-v3`) — bumping it invalidates the old
   shell on the next visit.
 - Registration is guarded so it's a no-op on `file://` and other insecure origins.
 

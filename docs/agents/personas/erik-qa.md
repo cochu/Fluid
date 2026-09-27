@@ -41,7 +41,8 @@ each of the 10 gotchas at least once.
    eager reference precedes its declaration — including inside object
    literals passed to constructors (e.g. the `new UI(CONFIG, { … })`
    options literal). This is `gotchas.md#13`. Method-shorthand keys are
-   fine; bare value expressions are not.
+   fine only while nothing at top level calls them synchronously (the
+   persisted-slider replay does); bare value expressions are not.
 4. **Toggle the new feature 5 times in a row.** Memory creep? Console errors?
    Visual artefacts that accumulate?
 5. **Toggle adaptive resolution down then up.** Did the new feature survive
